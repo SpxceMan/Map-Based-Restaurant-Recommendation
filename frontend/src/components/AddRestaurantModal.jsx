@@ -36,7 +36,6 @@ export default function AddRestaurantModal({ onClose, showToast }) {
         ...form,
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
-        user_id: user?.USER_ID,
         cuisines: selectedCuisines,
       })
       showToast('Restaurant submitted for admin approval!')

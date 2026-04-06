@@ -37,7 +37,6 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
     try {
       await reviewService.submit({
         restaurant_id: restaurant.RESTAURANT_ID,
-        user_id: user.USER_ID,
         rating,
         comment,
       })

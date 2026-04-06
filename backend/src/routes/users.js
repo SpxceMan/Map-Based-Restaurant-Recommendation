@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getConnection } = require('../db/connection');
 const oracledb = require('oracledb');
+const { createToken } = require('../middleware/auth');
 
 // POST /api/users/register
 router.post('/register', async (req, res) => {
@@ -14,7 +15,6 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    // Check uniqueness
     const check = await conn.execute(
       `SELECT USER_ID FROM USERS WHERE EMAIL = :email OR USERNAME = :username`,
       [email, username],
@@ -29,18 +29,11 @@ router.post('/register', async (req, res) => {
       `INSERT INTO USERS (USERNAME, EMAIL, PASSWORD_HASH, ROLE)
        VALUES (:username, :email, :password_hash, 'USER')
        RETURNING USER_ID INTO :id`,
-      {
-        username, email, password_hash,
-        id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
-      },
+      { username, email, password_hash, id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } },
       { autoCommit: true }
     );
 
-    res.status(201).json({
-      success: true,
-      message: 'User registered successfully',
-      user_id: result.outBinds.id[0]
-    });
+    res.status(201).json({ success: true, message: 'User registered successfully', user_id: result.outBinds.id[0] });
   } catch (err) {
     console.error('POST /users/register error:', err);
     res.status(500).json({ success: false, message: 'Database error', error: err.message });
@@ -49,7 +42,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// POST /api/users/login (simple - no JWT for minimal version)
+// POST /api/users/login — returns user data + session token
 router.post('/login', async (req, res) => {
   let conn;
   try {
@@ -67,7 +60,10 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    const user = result.rows[0];
+    const token = createToken(user.USER_ID, user.ROLE);
+
+    res.json({ success: true, data: user, token });
   } catch (err) {
     console.error('POST /users/login error:', err);
     res.status(500).json({ success: false, message: 'Database error', error: err.message });

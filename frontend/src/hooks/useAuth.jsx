@@ -1,35 +1,52 @@
 import { createContext, useContext, useState, useCallback } from 'react'
 import { userService } from '../services/api'
+import api from '../services/api'
 
 const AuthContext = createContext(null)
+
+const TOKEN_KEY = 'rms_token'
+const USER_KEY  = 'rms_user'
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      const stored = sessionStorage.getItem('rms_user')
+      const stored = sessionStorage.getItem(USER_KEY)
       return stored ? JSON.parse(stored) : null
     } catch { return null }
   })
 
+  // Re-attach stored token to axios on mount
+  useState(() => {
+    const token = sessionStorage.getItem(TOKEN_KEY)
+    if (token) api.defaults.headers.common['x-auth-token'] = token
+  })
+
   const login = useCallback(async (email, password) => {
-    // Simple SHA-256 placeholder — use bcrypt in production
-    const password_hash = btoa(password) // base64 for demo
+    const password_hash = btoa(password)
     const res = await userService.login({ email, password_hash })
-    const userData = res.data
+    const { data: userData, token } = res
+
+    // Store user + token
     setUser(userData)
-    sessionStorage.setItem('rms_user', JSON.stringify(userData))
+    sessionStorage.setItem(USER_KEY, JSON.stringify(userData))
+    sessionStorage.setItem(TOKEN_KEY, token)
+
+    // Attach token to all future axios requests
+    api.defaults.headers.common['x-auth-token'] = token
+
     return userData
   }, [])
 
   const register = useCallback(async (username, email, password) => {
     const password_hash = btoa(password)
-    const res = await userService.register({ username, email, password_hash })
-    return res
+    return userService.register({ username, email, password_hash })
   }, [])
 
   const logout = useCallback(() => {
     setUser(null)
-    sessionStorage.removeItem('rms_user')
+    sessionStorage.removeItem(USER_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
+    delete api.defaults.headers.common['x-auth-token']
   }, [])
 
   return (

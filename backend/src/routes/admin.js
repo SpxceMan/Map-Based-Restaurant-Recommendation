@@ -2,8 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { getConnection } = require('../db/connection');
 const oracledb = require('oracledb');
+const { requireAdmin } = require('../middleware/auth');
 
-// GET /api/admin/pending - Get pending restaurants
+// All admin routes require ADMIN role
+router.use(requireAdmin);
+
+// GET /api/admin/pending
 router.get('/pending', async (req, res) => {
   let conn;
   try {
@@ -68,7 +72,6 @@ router.delete('/restaurants/:id', async (req, res) => {
   let conn;
   try {
     conn = await getConnection();
-    // Delete related data first (FK constraints)
     await conn.execute(`DELETE FROM FAVORITES WHERE RESTAURANT_ID = :id`, [req.params.id], { autoCommit: true });
     await conn.execute(`DELETE FROM REVIEWS WHERE RESTAURANT_ID = :id`, [req.params.id], { autoCommit: true });
     await conn.execute(`DELETE FROM RESTAURANT_CUISINE WHERE RESTAURANT_ID = :id`, [req.params.id], { autoCommit: true });
