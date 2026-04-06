@@ -74,7 +74,7 @@ restaurant-app/
 3. Run the entire script. It will:
    - Drop and recreate all tables
    - Create sequences and triggers
-   - Insert seed data (5 Mysuru restaurants, cuisines, sample reviews)
+   - Insert seed data (5 Bengaluru restaurants, cuisines, sample reviews)
 
 4. Verify with:
    ```sql

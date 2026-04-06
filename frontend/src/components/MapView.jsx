@@ -10,6 +10,9 @@ L.Icon.Default.mergeOptions({
   shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
+// ── Hardcoded user location: 100 Feet Road, Indiranagar, Bengaluru ──
+const USER_LOCATION = { lat: 12.9784, lng: 77.6408, label: '100 Feet Rd, Indiranagar' }
+
 // Marker icons
 function makeIcon(color, size = 28) {
   return L.divIcon({
@@ -28,16 +31,40 @@ function makeIcon(color, size = 28) {
   })
 }
 
+// User location pulse icon
+const USER_ICON = L.divIcon({
+  className: '',
+  html: `<div style="position:relative;width:20px;height:20px;">
+    <div style="
+      position:absolute;inset:0;
+      border-radius:50%;
+      background:rgba(59,130,246,0.25);
+      animation:pulse 1.8s ease-out infinite;
+    "></div>
+    <div style="
+      position:absolute;top:50%;left:50%;
+      transform:translate(-50%,-50%);
+      width:12px;height:12px;
+      border-radius:50%;
+      background:#2563eb;
+      border:2.5px solid #fff;
+      box-shadow:0 1px 6px rgba(37,99,235,0.55);
+    "></div>
+    <style>@keyframes pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(2.8);opacity:0}}</style>
+  </div>`,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -14],
+})
+
 const DEFAULT_ICON  = makeIcon('#3d3530', 28)
 const SELECTED_ICON = makeIcon('#c0503a', 36)
 
-// Star string helper
 function stars(rating) {
-  const full  = Math.round(rating)
+  const full = Math.round(rating)
   return '★'.repeat(full) + '☆'.repeat(5 - full)
 }
 
-// STEP 3 + 5: render markers; popup shows name + avg_rating
 export default function MapView({ restaurants, selectedId, onMarkerClick }) {
   const mapRef      = useRef(null)
   const instanceRef = useRef(null)
@@ -48,8 +75,8 @@ export default function MapView({ restaurants, selectedId, onMarkerClick }) {
     if (instanceRef.current) return
 
     instanceRef.current = L.map(mapRef.current, {
-      center: [12.3052, 76.6551],   // Mysuru city centre
-      zoom: 14,
+      center: [USER_LOCATION.lat, USER_LOCATION.lng],  // Indiranagar, Bengaluru
+      zoom: 15,
       zoomControl: true,
     })
 
@@ -58,18 +85,29 @@ export default function MapView({ restaurants, selectedId, onMarkerClick }) {
       maxZoom: 19,
     }).addTo(instanceRef.current)
 
+    // Add user location marker (static, always present)
+    L.marker([USER_LOCATION.lat, USER_LOCATION.lng], { icon: USER_ICON, zIndexOffset: 2000 })
+      .bindPopup(
+        `<div style="font-family:'DM Sans',sans-serif;text-align:center;padding:4px 2px;">
+           <div style="font-size:18px;margin-bottom:2px;">📍</div>
+           <strong style="font-size:13px;color:#1e1a17;">You are here</strong>
+           <div style="font-size:11px;color:#7a6a60;margin-top:2px;">${USER_LOCATION.label}</div>
+         </div>`,
+        { maxWidth: 180 }
+      )
+      .addTo(instanceRef.current)
+
     return () => {
       instanceRef.current?.remove()
       instanceRef.current = null
     }
   }, [])
 
-  // Sync markers whenever restaurant list or selection changes
+  // Sync restaurant markers whenever list or selection changes
   useEffect(() => {
     const map = instanceRef.current
     if (!map) return
 
-    // Remove all old markers
     Object.values(markersRef.current).forEach(m => m.remove())
     markersRef.current = {}
 
@@ -82,7 +120,6 @@ export default function MapView({ restaurants, selectedId, onMarkerClick }) {
         zIndexOffset: isSelected ? 1000 : 0,
       })
 
-      // ── STEP 3 + 5: popup content ─────────────────────────────
       const avgRating  = parseFloat(r.AVG_RATING) || 0
       const starStr    = stars(avgRating)
       const ratingText = avgRating > 0
@@ -118,7 +155,7 @@ export default function MapView({ restaurants, selectedId, onMarkerClick }) {
     })
   }, [restaurants, selectedId])
 
-  // Pan + zoom to selected marker
+  // Pan to selected marker
   useEffect(() => {
     const map = instanceRef.current
     if (!map || !selectedId) return
