@@ -92,7 +92,7 @@ router.get('/:id/favorites', async (req, res) => {
        JOIN RESTAURANTS r ON f.RESTAURANT_ID = r.RESTAURANT_ID
        LEFT JOIN REVIEWS rv ON r.RESTAURANT_ID = rv.RESTAURANT_ID AND rv.STATUS = 'APPROVED'
        WHERE f.USER_ID = :usid
-       GROUP BY r.RESTAURANT_ID, r.NAME, r.ADDRESS, r.PRICE_RANGE
+       GROUP BY r.RESTAURANT_ID, r.NAME, r.ADDRESS, r.PRICE_RANGE, f.ADDED_AT
        ORDER BY f.ADDED_AT DESC`,
       { usid: Number(req.params.id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
