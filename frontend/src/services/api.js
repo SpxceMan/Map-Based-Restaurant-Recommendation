@@ -19,6 +19,7 @@ export const restaurantService = {
   getAll: () => api.get('/restaurants'),
   getById: (id) => api.get(`/restaurants/${id}`),
   create: (data) => api.post('/restaurants', data),
+  update: (id, data) => api.put(`/restaurants/${id}`, data),
 }
 
 export const reviewService = {
@@ -32,6 +33,16 @@ export const userService = {
   getFavorites: (id) => api.get(`/users/${id}/favorites`),
   addFavorite: (userId, restaurantId) =>
     api.post(`/users/${userId}/favorites`, { restaurant_id: restaurantId }),
+  getMyInvites: () => api.get('/users/me/invites'),
+  acceptInvite: (inviteId) => api.put(`/users/me/invites/${inviteId}/accept`),
+  declineInvite: (inviteId) => api.put(`/users/me/invites/${inviteId}/decline`),
+}
+
+export const eventService = {
+  getAll: () => api.get('/events'),
+  getByRestaurant: (id) => api.get(`/events/restaurant/${id}`),
+  create: (data) => api.post('/events', data),
+  delete: (id) => api.delete(`/events/${id}`),
 }
 
 export const adminService = {
@@ -44,6 +55,19 @@ export const adminService = {
   getPendingReviews: () => api.get('/admin/reviews/pending'),
   approveReview: (id) => api.put(`/admin/reviews/${id}/approve`),
   rejectReview: (id) => api.put(`/admin/reviews/${id}/reject`),
+  // Owners
+  getPendingOwners: () => api.get('/admin/owners/pending'),
+  approveOwner: (id) => api.put(`/admin/owners/${id}/approve`),
+  rejectOwner: (id) => api.put(`/admin/owners/${id}/reject`),
+  deleteOwner: (id) => api.delete(`/admin/owners/${id}`),
+  // Update requests
+  getUpdateRequests: () => api.get('/admin/update-requests'),
+  approveUpdate: (id) => api.put(`/admin/update-requests/${id}/approve`),
+  rejectUpdate: (id) => api.put(`/admin/update-requests/${id}/reject`),
+  // Admin invites
+  getUsers: () => api.get('/admin/users'),
+  sendInvite: (userId) => api.post('/admin/invites', { user_id: userId }),
+  getInvites: () => api.get('/admin/invites'),
 }
 
 export default api

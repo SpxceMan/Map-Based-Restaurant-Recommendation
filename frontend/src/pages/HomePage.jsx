@@ -3,7 +3,7 @@ import MapView from '../components/MapView'
 import RestaurantList from '../components/RestaurantList'
 import DetailPanel from '../components/DetailPanel'
 import { useAuth } from '../hooks/useAuth'
-import { userService } from '../services/api'
+import { userService, eventService } from '../services/api'
 
 const API = '/api/restaurants'
 const PRICES = ['$', '$$', '$$$', '$$$$']
@@ -19,6 +19,8 @@ export default function HomePage({ showToast }) {
   const [cuisineFilter, setCuisineFilter] = useState([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [favoriteIds, setFavoriteIds] = useState(new Set())
+  const [showEventsOnly, setShowEventsOnly] = useState(false)
+  const [eventRestaurantIds, setEventRestaurantIds] = useState(new Set())
 
   const fetchRestaurants = () => {
     fetch(API)
@@ -49,6 +51,13 @@ export default function HomePage({ showToast }) {
 
   useEffect(() => {
     fetchRestaurants()
+    // Fetch events to know which restaurants have upcoming events
+    eventService.getAll()
+      .then(res => {
+        const ids = new Set((res.data || []).map(e => e.RESTAURANT_ID))
+        setEventRestaurantIds(ids)
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -79,9 +88,10 @@ export default function HomePage({ showToast }) {
         if (!cuisineFilter.some(c => rCuisines.includes(c))) return false
       }
       if (showFavoritesOnly && !favoriteIds.has(r.RESTAURANT_ID)) return false
+      if (showEventsOnly && !eventRestaurantIds.has(r.RESTAURANT_ID)) return false
       return true
     })
-  }, [restaurants, search, priceFilter, minRating, cuisineFilter, showFavoritesOnly, favoriteIds])
+  }, [restaurants, search, priceFilter, minRating, cuisineFilter, showFavoritesOnly, favoriteIds, showEventsOnly, eventRestaurantIds])
 
   const handleSelect = (r) =>
     setSelected(prev => prev?.RESTAURANT_ID === r.RESTAURANT_ID ? null : r)
@@ -117,9 +127,9 @@ export default function HomePage({ showToast }) {
       .catch(() => {})
   }
 
-  const hasFilters = priceFilter.length > 0 || minRating > 0 || cuisineFilter.length > 0 || showFavoritesOnly
+  const hasFilters = priceFilter.length > 0 || minRating > 0 || cuisineFilter.length > 0 || showFavoritesOnly || showEventsOnly
 
-  const clearAll = () => { setPriceFilter([]); setMinRating(0); setCuisineFilter([]); setShowFavoritesOnly(false) }
+  const clearAll = () => { setPriceFilter([]); setMinRating(0); setCuisineFilter([]); setShowFavoritesOnly(false); setShowEventsOnly(false) }
 
   const chipStyle = (active) => ({
     padding: '3px 10px',
@@ -179,12 +189,31 @@ export default function HomePage({ showToast }) {
 
           {/* Favorites filter - only show when logged in */}
           {user && (
-            <div style={{ marginTop: '0.75rem' }}>
+            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
               <button
                 onClick={() => setShowFavoritesOnly(v => !v)}
                 style={favChipStyle(showFavoritesOnly)}
               >
                 {showFavoritesOnly ? '♥' : '♡'} Favourites{favoriteIds.size > 0 ? ` (${favoriteIds.size})` : ''}
+              </button>
+              {eventRestaurantIds.size > 0 && (
+                <button
+                  onClick={() => setShowEventsOnly(v => !v)}
+                  style={chipStyle(showEventsOnly)}
+                >
+                  📅 Has Events ({eventRestaurantIds.size})
+                </button>
+              )}
+            </div>
+          )}
+          {/* Events filter for non-logged-in users */}
+          {!user && eventRestaurantIds.size > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <button
+                onClick={() => setShowEventsOnly(v => !v)}
+                style={chipStyle(showEventsOnly)}
+              >
+                📅 Has Events ({eventRestaurantIds.size})
               </button>
             </div>
           )}

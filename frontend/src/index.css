@@ -834,3 +834,89 @@ body {
     height: 55vh;
   }
 }
+
+/* ── Event Cards ───────────────────────── */
+.events-section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.event-card {
+  background: linear-gradient(135deg, #fff8f0, #fff);
+  border: 1px solid #f0e6d8;
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.5rem;
+  transition: transform 200ms, box-shadow 200ms;
+}
+.event-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+}
+
+.event-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.event-name {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--charcoal);
+}
+
+.event-status-badge {
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.event-status-badge.upcoming {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+.event-status-badge.ongoing {
+  background: #fff3e0;
+  color: #e65100;
+}
+.event-status-badge.completed {
+  background: #e0e0e0;
+  color: #616161;
+}
+.event-status-badge.cancelled {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.event-date {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.event-desc {
+  font-size: 0.82rem;
+  color: var(--text);
+  margin: 0.35rem 0 0 0;
+  line-height: 1.4;
+}
+
+/* ── Admin danger button ──────────────── */
+.btn-danger {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: 150ms;
+}
+.btn-danger:hover {
+  background: #c82333;
+}

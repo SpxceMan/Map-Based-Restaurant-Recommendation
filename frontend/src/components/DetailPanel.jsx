@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { reviewService } from '../services/api'
+import { reviewService, eventService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 
 function StarSelector({ value, onChange }) {
@@ -60,6 +60,7 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
   const [loadingReviews, setLoadingReviews] = useState(false)
   const [liveAvgRating, setLiveAvgRating] = useState(0)
   const [liveReviewCount, setLiveReviewCount] = useState(0)
+  const [events, setEvents] = useState([])
 
   // Fetch reviews when restaurant changes
   const fetchReviews = useCallback(async () => {
@@ -88,6 +89,12 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
 
   useEffect(() => {
     fetchReviews()
+    // Fetch events
+    if (restaurant) {
+      eventService.getByRestaurant(restaurant.RESTAURANT_ID)
+        .then(res => setEvents(res.data || []))
+        .catch(() => setEvents([]))
+    }
   }, [fetchReviews])
 
   if (!restaurant) return null
@@ -188,6 +195,27 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
           </span>
         )}
       </div>
+
+      {/* Events Section */}
+      {events.length > 0 && (
+        <div className="events-section">
+          <h4 style={{ margin: '0 0 0.5rem 0', fontFamily: 'var(--font-display)' }}>📅 Events</h4>
+          {events.filter(e => e.STATUS === 'UPCOMING' || e.STATUS === 'ONGOING').map(event => (
+            <div key={event.EVENT_ID} className="event-card">
+              <div className="event-card-header">
+                <span className="event-name">{event.EVENT_NAME}</span>
+                <span className={`event-status-badge ${event.STATUS.toLowerCase()}`}>{event.STATUS}</span>
+              </div>
+              <div className="event-date">
+                📅 {new Date(event.EVENT_DATE).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+              </div>
+              {event.DESCRIPTION && (
+                <p className="event-desc">{event.DESCRIPTION}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {showReviewForm && (
         <div className="review-form">

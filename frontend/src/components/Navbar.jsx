@@ -21,11 +21,20 @@ export default function Navbar({ onAddRestaurant, onLogin }) {
             {user.ROLE === 'ADMIN' && (
               <Link to="/admin" className="btn btn-outline btn-sm">Admin Panel</Link>
             )}
-            {/* Add restaurant - only for OWNER, NOT admin */}
-            {user.ROLE === 'OWNER' && (
+            {/* Add restaurant - only for approved OWNER */}
+            {user.ROLE === 'OWNER' && user.STATUS === 'APPROVED' && (
               <button className="btn btn-primary btn-sm" onClick={onAddRestaurant}>
                 + Add Restaurant
               </button>
+            )}
+            {/* Pending owner indicator */}
+            {user.ROLE === 'OWNER' && user.STATUS === 'PENDING' && (
+              <span className="btn btn-outline btn-sm" style={{ 
+                cursor: 'default', opacity: 0.7, 
+                borderColor: 'var(--gold)', color: 'var(--gold)' 
+              }}>
+                ⏳ Pending Approval
+              </span>
             )}
             <button className="btn btn-outline btn-sm" onClick={logout}>
               Sign out

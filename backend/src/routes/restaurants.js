@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getConnection } = require('../db/connection');
 const oracledb = require('oracledb');
-const { requireOwner } = require('../middleware/auth');
+const { requireOwner, requireAuth } = require('../middleware/auth');
 
 // GET /api/restaurants — public, approved only
 router.get('/', async (req, res) => {
@@ -179,6 +179,75 @@ router.post('/', requireOwner, async (req, res) => {
   } catch (err) {
     if (conn) { try { await conn.rollback(); } catch (_) {} }
     console.error('POST /restaurants error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Database error' });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+// PUT /api/restaurants/:id — Owner submits update request (per-field)
+router.put('/:id', requireAuth, async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    const user_id = req.authUser.userId;
+    const user_role = req.authUser.role;
+    const restaurantId = Number(req.params.id);
+
+    if (user_role !== 'OWNER') {
+      return res.status(403).json({ success: false, message: 'Only owners can request updates' });
+    }
+
+    // Verify ownership
+    const ownerCheck = await conn.execute(
+      `SELECT NAME, ADDRESS, PHONE, WEBSITE, PRICE_RANGE, ADDED_BY
+       FROM RESTAURANTS WHERE RESTAURANT_ID = :rsid AND STATUS = 'APPROVED'`,
+      { rsid: restaurantId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (ownerCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Restaurant not found' });
+    }
+    if (ownerCheck.rows[0].ADDED_BY !== user_id) {
+      return res.status(403).json({ success: false, message: 'You can only update your own restaurants' });
+    }
+
+    const current = ownerCheck.rows[0];
+    const { name, address, phone, website, price_range } = req.body;
+    const updatableFields = { NAME: name, ADDRESS: address, PHONE: phone, WEBSITE: website, PRICE_RANGE: price_range };
+
+    let requestCount = 0;
+    for (const [field, newValue] of Object.entries(updatableFields)) {
+      if (newValue !== undefined && newValue !== current[field]) {
+        const seqRes = await conn.execute(
+          `SELECT SEQ_REQUEST_ID.NEXTVAL AS NID FROM DUAL`,
+          [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        await conn.execute(
+          `INSERT INTO UPDATE_REQUESTS (REQUEST_ID, RESTAURANT_ID, OWNER_ID, FIELD_NAME, OLD_VALUE, NEW_VALUE, STATUS)
+           VALUES (:reqid, :rsid, :owid, :fld, :oldv, :newv, 'PENDING')`,
+          {
+            reqid: seqRes.rows[0].NID,
+            rsid: restaurantId,
+            owid: user_id,
+            fld: field,
+            oldv: current[field] || null,
+            newv: newValue || null
+          },
+          { autoCommit: false }
+        );
+        requestCount++;
+      }
+    }
+
+    if (requestCount === 0) {
+      return res.json({ success: true, message: 'No changes detected' });
+    }
+
+    await conn.commit();
+    res.json({ success: true, message: `${requestCount} update request(s) submitted for admin review` });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch (_) {} }
+    console.error('PUT /restaurants/:id error:', err);
     res.status(500).json({ success: false, message: err.message || 'Database error' });
   } finally {
     if (conn) await conn.close();

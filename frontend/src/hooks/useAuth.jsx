@@ -15,7 +15,7 @@ export function AuthProvider({ children }) {
     } catch { return null }
   })
 
-  // FIXED: useEffect (not useState) so this actually runs on mount
+  // Set token on mount
   useEffect(() => {
     const token = sessionStorage.getItem(TOKEN_KEY)
     if (token) api.defaults.headers.common['x-auth-token'] = token
@@ -34,9 +34,14 @@ export function AuthProvider({ children }) {
     return userData
   }, [])
 
-  const register = useCallback(async (username, email, password, role) => {
+  const register = useCallback(async (username, email, password, role, license_number) => {
     const password_hash = btoa(password)
-    return userService.register({ username, email, password_hash, role: role || 'USER' })
+    const res = await userService.register({
+      username, email, password_hash,
+      role: role || 'USER',
+      license_number: role === 'OWNER' ? license_number : undefined
+    })
+    return res.message
   }, [])
 
   const logout = useCallback(() => {
@@ -46,8 +51,18 @@ export function AuthProvider({ children }) {
     delete api.defaults.headers.common['x-auth-token']
   }, [])
 
+  // Update user data (e.g. after accepting admin invite)
+  const updateUser = useCallback((newUserData, newToken) => {
+    setUser(newUserData)
+    sessionStorage.setItem(USER_KEY, JSON.stringify(newUserData))
+    if (newToken) {
+      sessionStorage.setItem(TOKEN_KEY, newToken)
+      api.defaults.headers.common['x-auth-token'] = newToken
+    }
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider value={{ user, login, register, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   )

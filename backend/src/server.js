@@ -8,6 +8,7 @@ const restaurantsRouter = require('./routes/restaurants');
 const reviewsRouter = require('./routes/reviews');
 const usersRouter = require('./routes/users');
 const adminRouter = require('./routes/admin');
+const eventsRouter = require('./routes/events');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -35,6 +36,7 @@ app.use('/api/restaurants', restaurantsRouter);
 app.use('/api/reviews', reviewsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/events', eventsRouter);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -59,11 +61,14 @@ async function syncSequences() {
   try {
     conn = await getConnection();
     const pairs = [
-      { seq: 'SEQ_USER_ID',       table: 'USERS',       col: 'USER_ID' },
-      { seq: 'SEQ_RESTAURANT_ID', table: 'RESTAURANTS', col: 'RESTAURANT_ID' },
-      { seq: 'SEQ_REVIEW_ID',     table: 'REVIEWS',     col: 'REVIEW_ID' },
-      { seq: 'SEQ_CUISINE_ID',    table: 'CUISINES',    col: 'CUISINE_ID' },
-      { seq: 'SEQ_FAVORITE_ID',   table: 'FAVORITES',   col: 'FAVORITE_ID' },
+      { seq: 'SEQ_USER_ID',       table: 'USERS',          col: 'USER_ID' },
+      { seq: 'SEQ_RESTAURANT_ID', table: 'RESTAURANTS',    col: 'RESTAURANT_ID' },
+      { seq: 'SEQ_REVIEW_ID',     table: 'REVIEWS',        col: 'REVIEW_ID' },
+      { seq: 'SEQ_CUISINE_ID',    table: 'CUISINES',       col: 'CUISINE_ID' },
+      { seq: 'SEQ_FAVORITE_ID',   table: 'FAVORITES',      col: 'FAVORITE_ID' },
+      { seq: 'SEQ_REQUEST_ID',    table: 'UPDATE_REQUESTS', col: 'REQUEST_ID' },
+      { seq: 'SEQ_EVENT_ID',      table: 'EVENTS',          col: 'EVENT_ID' },
+      { seq: 'SEQ_INVITE_ID',     table: 'ADMIN_INVITES',   col: 'INVITE_ID' },
     ];
     for (const { seq, table, col } of pairs) {
       const maxRes = await conn.execute(

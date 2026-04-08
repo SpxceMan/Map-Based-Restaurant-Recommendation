@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage'
 import AdminPage from './pages/AdminPage'
 import AuthModal from './components/AuthModal'
 import AddRestaurantModal from './components/AddRestaurantModal'
+import AdminInvitePopup from './components/AdminInvitePopup'
 
 export default function App() {
   const { toast, show: showToast } = useToast()
@@ -33,6 +34,9 @@ export default function App() {
         {showAdd && (
           <AddRestaurantModal onClose={() => setShowAdd(false)} showToast={showToast} />
         )}
+
+        {/* Persistent admin invite popup — shows until accepted/declined */}
+        <AdminInvitePopup showToast={showToast} />
 
         {toast && (
           <div className={`toast ${toast.type}`}>{toast.message}</div>

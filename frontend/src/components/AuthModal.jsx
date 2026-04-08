@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 export default function AuthModal({ onClose, showToast }) {
   const { login, register } = useAuth()
   const [screen, setScreen] = useState('login') // 'login' | 'register'
-  const [form, setForm] = useState({ username: '', email: '', password: '', role: 'USER' })
+  const [form, setForm] = useState({ username: '', email: '', password: '', role: 'USER', license_number: '' })
   const [loading, setLoading] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -18,10 +18,18 @@ export default function AuthModal({ onClose, showToast }) {
         onClose()
       } else {
         if (!form.username.trim()) return showToast('Username is required', 'error')
-        await register(form.username, form.email, form.password, form.role)
-        showToast('Account created! Please sign in.')
-        setScreen('login')
-        setForm({ username: '', email: '', password: '', role: 'USER' })
+        if (form.role === 'OWNER' && !form.license_number.trim()) {
+          return showToast('License number is required for owner accounts', 'error')
+        }
+        const msg = await register(form.username, form.email, form.password, form.role, form.license_number)
+        showToast(msg || 'Account created!')
+        if (form.role === 'OWNER') {
+          // Don't switch to login — owner needs approval first
+          onClose()
+        } else {
+          setScreen('login')
+          setForm({ username: '', email: '', password: '', role: 'USER', license_number: '' })
+        }
       }
     } catch (err) {
       showToast(err.message, 'error')
@@ -31,7 +39,7 @@ export default function AuthModal({ onClose, showToast }) {
   }
 
   const switchScreen = (s) => {
-    setForm({ username: '', email: '', password: '', role: 'USER' })
+    setForm({ username: '', email: '', password: '', role: 'USER', license_number: '' })
     setScreen(s)
   }
 
@@ -121,6 +129,23 @@ export default function AuthModal({ onClose, showToast }) {
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Owner-only: license number */}
+        {screen === 'register' && form.role === 'OWNER' && (
+          <div className="form-group">
+            <label className="form-label">Business License Number *</label>
+            <input
+              className="form-input"
+              type="text"
+              placeholder="e.g. LIC-BLR-2024-001"
+              value={form.license_number}
+              onChange={e => set('license_number', e.target.value)}
+            />
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+              ⓘ Your account will need admin approval before you can add restaurants.
             </div>
           </div>
         )}
