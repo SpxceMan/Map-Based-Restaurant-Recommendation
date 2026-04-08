@@ -37,4 +37,15 @@ function requireAdmin(req, res, next) {
   next()
 }
 
-module.exports = { createToken, verifyToken, requireAuth, requireAdmin }
+// OWNER only — admins cannot add restaurants
+function requireOwner(req, res, next) {
+  const token = req.headers['x-auth-token']
+  if (!token) return res.status(401).json({ success: false, message: 'Authentication required' })
+  const user = verifyToken(token)
+  if (!user) return res.status(401).json({ success: false, message: 'Invalid or expired session' })
+  if (user.role !== 'OWNER') return res.status(403).json({ success: false, message: 'Only restaurant owners can add restaurants' })
+  req.authUser = user
+  next()
+}
+
+module.exports = { createToken, verifyToken, requireAuth, requireAdmin, requireOwner }

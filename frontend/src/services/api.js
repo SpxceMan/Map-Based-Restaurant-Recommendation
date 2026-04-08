@@ -35,10 +35,15 @@ export const userService = {
 }
 
 export const adminService = {
+  // Restaurants
   getPending: () => api.get('/admin/pending'),
   approve: (id) => api.put(`/admin/restaurants/${id}/approve`),
   reject: (id) => api.put(`/admin/restaurants/${id}/reject`),
   delete: (id) => api.delete(`/admin/restaurants/${id}`),
+  // Reviews
+  getPendingReviews: () => api.get('/admin/reviews/pending'),
+  approveReview: (id) => api.put(`/admin/reviews/${id}/approve`),
+  rejectReview: (id) => api.put(`/admin/reviews/${id}/reject`),
 }
 
 export default api

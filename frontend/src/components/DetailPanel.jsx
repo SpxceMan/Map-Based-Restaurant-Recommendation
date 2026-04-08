@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { reviewService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 
@@ -20,12 +20,75 @@ function StarSelector({ value, onChange }) {
   )
 }
 
-export default function DetailPanel({ restaurant, onClose, onFavorite, showToast }) {
+function StarDisplay({ rating }) {
+  const full = Math.floor(rating)
+  const half = rating - full >= 0.5
+  return (
+    <span className="star-display">
+      {[1, 2, 3, 4, 5].map(n => (
+        <span
+          key={n}
+          className={`star-icon ${n <= full ? 'filled' : n === full + 1 && half ? 'half' : 'empty'}`}
+        >★</span>
+      ))}
+    </span>
+  )
+}
+
+function timeAgo(dateStr) {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const seconds = Math.floor((now - date) / 1000)
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  return `${months}mo ago`
+}
+
+export default function DetailPanel({ restaurant, onClose, onFavorite, showToast, onRatingUpdate }) {
   const { user } = useAuth()
   const [rating, setRating] = useState(0)
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [showReviewForm, setShowReviewForm] = useState(false)
+  const [reviews, setReviews] = useState([])
+  const [loadingReviews, setLoadingReviews] = useState(false)
+  const [liveAvgRating, setLiveAvgRating] = useState(0)
+  const [liveReviewCount, setLiveReviewCount] = useState(0)
+
+  // Fetch reviews when restaurant changes
+  const fetchReviews = useCallback(async () => {
+    if (!restaurant) return
+    setLoadingReviews(true)
+    try {
+      const res = await reviewService.getByRestaurant(restaurant.RESTAURANT_ID)
+      const reviewData = res.data || []
+      setReviews(reviewData)
+
+      // Recalculate average rating from fetched reviews
+      if (reviewData.length > 0) {
+        const avg = reviewData.reduce((sum, r) => sum + Number(r.RATING), 0) / reviewData.length
+        setLiveAvgRating(Math.round(avg * 10) / 10)
+        setLiveReviewCount(reviewData.length)
+      } else {
+        setLiveAvgRating(restaurant.AVG_RATING || 0)
+        setLiveReviewCount(restaurant.REVIEW_COUNT || 0)
+      }
+    } catch (err) {
+      console.error('Failed to fetch reviews:', err)
+    } finally {
+      setLoadingReviews(false)
+    }
+  }, [restaurant])
+
+  useEffect(() => {
+    fetchReviews()
+  }, [fetchReviews])
 
   if (!restaurant) return null
 
@@ -40,10 +103,18 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
         rating,
         comment,
       })
-      showToast('Review submitted!')
+      showToast('Review published! 🎉')
       setRating(0)
       setComment('')
       setShowReviewForm(false)
+
+      // Re-fetch reviews to update the list and rating in real time
+      await fetchReviews()
+
+      // Notify parent to update the restaurant list rating
+      if (onRatingUpdate) {
+        onRatingUpdate(restaurant.RESTAURANT_ID)
+      }
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -52,6 +123,9 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
   }
 
   const priceMap = { '$': 'Budget', '$$': 'Moderate', '$$$': 'Upscale', '$$$$': 'Fine Dining' }
+
+  const displayRating = liveReviewCount > 0 ? liveAvgRating : (restaurant.AVG_RATING || 0)
+  const displayCount = liveReviewCount > 0 ? liveReviewCount : (restaurant.REVIEW_COUNT || 0)
 
   return (
     <div className="detail-panel">
@@ -67,9 +141,9 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
         </span>
         <div className="star-rating">
           <span>★</span>
-          <strong>{restaurant.AVG_RATING > 0 ? restaurant.AVG_RATING : 'No ratings'}</strong>
-          {restaurant.REVIEW_COUNT > 0 && (
-            <span className="count">({restaurant.REVIEW_COUNT} reviews)</span>
+          <strong>{displayRating > 0 ? displayRating : 'No ratings'}</strong>
+          {displayCount > 0 && (
+            <span className="count">({displayCount} review{displayCount !== 1 ? 's' : ''})</span>
           )}
         </div>
         <div className="cuisine-tags">
@@ -149,6 +223,63 @@ export default function DetailPanel({ restaurant, onClose, onFavorite, showToast
           </div>
         </div>
       )}
+
+      {/* Reviews Section */}
+      <div className="reviews-section">
+        <div className="reviews-header">
+          <h4>Reviews</h4>
+          {displayCount > 0 && (
+            <span className="reviews-avg-badge">
+              ★ {displayRating} <span className="avg-label">avg</span>
+            </span>
+          )}
+        </div>
+
+        {loadingReviews && (
+          <div className="reviews-loading">
+            <div className="spinner" style={{ width: 20, height: 20 }}></div>
+            <span>Loading reviews…</span>
+          </div>
+        )}
+
+        {!loadingReviews && reviews.length === 0 && (
+          <div className="reviews-empty">
+            <span className="reviews-empty-icon">💬</span>
+            <span>No reviews yet. Be the first to share your experience!</span>
+          </div>
+        )}
+
+        {!loadingReviews && reviews.length > 0 && (
+          <div className="reviews-list">
+            {reviews.map((review, idx) => (
+              <div
+                key={review.REVIEW_ID || idx}
+                className="review-card"
+                style={{ animationDelay: `${idx * 50}ms` }}
+              >
+                <div className="review-card-header">
+                  <div className="review-user-info">
+                    <div className="review-avatar">
+                      {(review.USERNAME || 'U').charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="review-username">{review.USERNAME}</div>
+                      <div className="review-date">{timeAgo(review.CREATED_AT)}</div>
+                    </div>
+                  </div>
+                  <div className="review-rating-badge">
+                    <StarDisplay rating={Number(review.RATING)} />
+                    <span className="review-rating-num">{review.RATING}</span>
+                  </div>
+                </div>
+                {review.REVIEW_COMMENT && (
+                  <p className="review-text">{review.REVIEW_COMMENT}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

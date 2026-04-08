@@ -2,7 +2,15 @@ import { useState } from 'react'
 import { restaurantService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 
-const CUISINES = ['Indian', 'Chinese', 'Italian', 'Mexican', 'American', 'Japanese', 'Thai', 'Mediterranean', 'South Indian', 'Fast Food']
+// FIX: Cuisine names must exactly match the DB CUISINES table (seed.sql).
+// Original had 'Indian' (does not exist — DB has 'South Indian' and 'North Indian'),
+// and was missing 'Bakery & Cafe', 'Continental', 'Biryani', 'North Indian'.
+// Mismatched names caused all cuisine links to be silently skipped on insert.
+const CUISINES = [
+  'South Indian', 'North Indian', 'Chinese', 'Fast Food',
+  'Bakery & Cafe', 'Continental', 'Biryani', 'Italian',
+  'Mexican', 'American', 'Japanese', 'Thai', 'Mediterranean'
+]
 
 export default function AddRestaurantModal({ onClose, showToast }) {
   const { user } = useAuth()

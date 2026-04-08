@@ -1,12 +1,15 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import MapView from '../components/MapView'
 import RestaurantList from '../components/RestaurantList'
 import DetailPanel from '../components/DetailPanel'
+import { useAuth } from '../hooks/useAuth'
+import { userService } from '../services/api'
 
 const API = '/api/restaurants'
 const PRICES = ['$', '$$', '$$$', '$$$$']
 
 export default function HomePage({ showToast }) {
+  const { user } = useAuth()
   const [restaurants, setRestaurants] = useState([])
   const [loading, setLoading]         = useState(true)
   const [selected, setSelected]       = useState(null)
@@ -14,8 +17,10 @@ export default function HomePage({ showToast }) {
   const [priceFilter, setPriceFilter] = useState([])
   const [minRating, setMinRating]     = useState(0)
   const [cuisineFilter, setCuisineFilter] = useState([])
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  const [favoriteIds, setFavoriteIds] = useState(new Set())
 
-  useEffect(() => {
+  const fetchRestaurants = () => {
     fetch(API)
       .then(r => r.json())
       .then(res => {
@@ -24,7 +29,31 @@ export default function HomePage({ showToast }) {
       })
       .catch(() => showToast('Cannot reach the server — is the backend running?', 'error'))
       .finally(() => setLoading(false))
+  }
+
+  // Fetch user's favorites
+  const fetchFavorites = useCallback(async () => {
+    if (!user) {
+      setFavoriteIds(new Set())
+      setShowFavoritesOnly(false)
+      return
+    }
+    try {
+      const res = await userService.getFavorites(user.USER_ID)
+      const ids = (res.data || []).map(f => f.RESTAURANT_ID)
+      setFavoriteIds(new Set(ids))
+    } catch (err) {
+      console.error('Failed to fetch favorites:', err)
+    }
+  }, [user])
+
+  useEffect(() => {
+    fetchRestaurants()
   }, [])
+
+  useEffect(() => {
+    fetchFavorites()
+  }, [fetchFavorites])
 
   // Collect all unique cuisines from loaded data
   const allCuisines = useMemo(() => {
@@ -49,18 +78,48 @@ export default function HomePage({ showToast }) {
         const rCuisines = r.CUISINES || []
         if (!cuisineFilter.some(c => rCuisines.includes(c))) return false
       }
+      if (showFavoritesOnly && !favoriteIds.has(r.RESTAURANT_ID)) return false
       return true
     })
-  }, [restaurants, search, priceFilter, minRating, cuisineFilter])
+  }, [restaurants, search, priceFilter, minRating, cuisineFilter, showFavoritesOnly, favoriteIds])
 
   const handleSelect = (r) =>
     setSelected(prev => prev?.RESTAURANT_ID === r.RESTAURANT_ID ? null : r)
 
-  const handleFavorite = () => showToast('Sign in to save favourites', 'error')
+  const handleFavorite = async (restaurantId) => {
+    if (!user) return showToast('Sign in to save favourites', 'error')
+    try {
+      await userService.addFavorite(user.USER_ID, restaurantId)
+      showToast('Saved to favourites ♡')
+      // Update favorites set in real time
+      setFavoriteIds(prev => new Set([...prev, restaurantId]))
+    } catch (err) {
+      if (err.message?.toLowerCase().includes('already')) {
+        showToast('Already in your favourites', 'error')
+      } else {
+        showToast(err.message || 'Could not save favourite', 'error')
+      }
+    }
+  }
 
-  const hasFilters = priceFilter.length > 0 || minRating > 0 || cuisineFilter.length > 0
+  // Re-fetch restaurant list so ratings in sidebar update in real time
+  const handleRatingUpdate = (restaurantId) => {
+    fetch(API)
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          setRestaurants(res.data)
+          // Update the selected restaurant too
+          const updated = res.data.find(r => r.RESTAURANT_ID === restaurantId)
+          if (updated) setSelected(updated)
+        }
+      })
+      .catch(() => {})
+  }
 
-  const clearAll = () => { setPriceFilter([]); setMinRating(0); setCuisineFilter([]) }
+  const hasFilters = priceFilter.length > 0 || minRating > 0 || cuisineFilter.length > 0 || showFavoritesOnly
+
+  const clearAll = () => { setPriceFilter([]); setMinRating(0); setCuisineFilter([]); setShowFavoritesOnly(false) }
 
   const chipStyle = (active) => ({
     padding: '3px 10px',
@@ -74,6 +133,23 @@ export default function HomePage({ showToast }) {
     cursor: 'pointer',
     transition: '150ms',
     whiteSpace: 'nowrap',
+  })
+
+  const favChipStyle = (active) => ({
+    padding: '3px 10px',
+    borderRadius: 99,
+    border: '1.5px solid',
+    borderColor: active ? '#e74c3c' : 'var(--border)',
+    background: active ? '#fdf2f0' : 'transparent',
+    color: active ? '#e74c3c' : 'var(--text-muted)',
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: '150ms',
+    whiteSpace: 'nowrap',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.25rem',
   })
 
   const sectionLabel = {
@@ -100,6 +176,18 @@ export default function HomePage({ showToast }) {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
+
+          {/* Favorites filter - only show when logged in */}
+          {user && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <button
+                onClick={() => setShowFavoritesOnly(v => !v)}
+                style={favChipStyle(showFavoritesOnly)}
+              >
+                {showFavoritesOnly ? '♥' : '♡'} Favourites{favoriteIds.size > 0 ? ` (${favoriteIds.size})` : ''}
+              </button>
+            </div>
+          )}
 
           {/* Price filter */}
           <div style={{ marginTop: '0.75rem' }}>
@@ -171,6 +259,7 @@ export default function HomePage({ showToast }) {
             onClose={() => setSelected(null)}
             onFavorite={handleFavorite}
             showToast={showToast}
+            onRatingUpdate={handleRatingUpdate}
           />
         )}
       </div>

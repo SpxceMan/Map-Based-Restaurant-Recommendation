@@ -15,7 +15,10 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  // FIX: Must include 'x-auth-token' — this is the custom header the app uses for auth.
+  // Without it, browser CORS preflight rejects requests that carry this header,
+  // causing all protected endpoints to fail before reaching any route handler.
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token'],
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -52,8 +55,8 @@ app.use((err, req, res, next) => {
 async function start() {
   await initPool();
   app.listen(PORT, () => {
-    console.log(`🚀 Server running at http://localhost:${PORT}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
   });
 }
 

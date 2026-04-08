@@ -14,13 +14,17 @@ export default function Navbar({ onAddRestaurant, onLogin }) {
       <div className="navbar-actions">
         {user ? (
           <>
-            <span className="navbar-user">👤 {user.USERNAME}</span>
+            <span className="navbar-user">
+              {user.ROLE === 'ADMIN' ? '🛡️' : user.ROLE === 'OWNER' ? '🏪' : '👤'} {user.USERNAME}
+            </span>
+            {/* Admin dashboard link - only for ADMIN */}
             {user.ROLE === 'ADMIN' && (
-              <Link to="/admin" className="btn btn-outline btn-sm">Admin</Link>
+              <Link to="/admin" className="btn btn-outline btn-sm">Admin Panel</Link>
             )}
-            {user.ROLE === 'ADMIN' && (
+            {/* Add restaurant - only for OWNER, NOT admin */}
+            {user.ROLE === 'OWNER' && (
               <button className="btn btn-primary btn-sm" onClick={onAddRestaurant}>
-                + Add
+                + Add Restaurant
               </button>
             )}
             <button className="btn btn-outline btn-sm" onClick={logout}>

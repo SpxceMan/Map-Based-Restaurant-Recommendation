@@ -2,22 +2,25 @@ const express = require('express');
 const router = express.Router();
 const { getConnection } = require('../db/connection');
 const oracledb = require('oracledb');
-const { createToken } = require('../middleware/auth');
+const { createToken, verifyToken } = require('../middleware/auth');
 
 // POST /api/users/register
 router.post('/register', async (req, res) => {
   let conn;
   try {
     conn = await getConnection();
-    const { username, email, password_hash } = req.body;
+    const { username, email, password_hash, role } = req.body;
+    const userRole = (role === 'OWNER') ? 'OWNER' : 'USER';
 
     if (!username || !email || !password_hash) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
+    // NOTE: Do NOT use :uid (Oracle reserved), :role (Oracle reserved), :name (reserved)
+    // Safe bind names used: :usid, :uname, :email, :phash, :urole
     const check = await conn.execute(
-      `SELECT USER_ID FROM USERS WHERE EMAIL = :email OR USERNAME = :username`,
-      [email, username],
+      `SELECT USER_ID FROM USERS WHERE EMAIL = :email OR USERNAME = :uname`,
+      { email, uname: username },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
@@ -25,24 +28,30 @@ router.post('/register', async (req, res) => {
       return res.status(409).json({ success: false, message: 'Email or username already exists' });
     }
 
-    const result = await conn.execute(
-      `INSERT INTO USERS (USERNAME, EMAIL, PASSWORD_HASH, ROLE)
-       VALUES (:username, :email, :password_hash, 'USER')
-       RETURNING USER_ID INTO :id`,
-      { username, email, password_hash, id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } },
+    const seqRes = await conn.execute(
+      `SELECT SEQ_USER_ID.NEXTVAL AS NID FROM DUAL`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const newId = seqRes.rows[0].NID;
+
+    await conn.execute(
+      `INSERT INTO USERS (USER_ID, USERNAME, EMAIL, PASSWORD_HASH, ROLE)
+       VALUES (:usid, :uname, :email, :phash, :urole)`,
+      { usid: newId, uname: username, email, phash: password_hash, urole: userRole },
       { autoCommit: true }
     );
 
-    res.status(201).json({ success: true, message: 'User registered successfully', user_id: result.outBinds.id[0] });
+    res.status(201).json({ success: true, message: 'User registered successfully', user_id: newId });
   } catch (err) {
     console.error('POST /users/register error:', err);
-    res.status(500).json({ success: false, message: 'Database error', error: err.message });
+    res.status(500).json({ success: false, message: err.message || 'Database error' });
   } finally {
     if (conn) await conn.close();
   }
 });
 
-// POST /api/users/login — returns user data + session token
+// POST /api/users/login
 router.post('/login', async (req, res) => {
   let conn;
   try {
@@ -51,8 +60,8 @@ router.post('/login', async (req, res) => {
 
     const result = await conn.execute(
       `SELECT USER_ID, USERNAME, EMAIL, ROLE FROM USERS
-       WHERE EMAIL = :email AND PASSWORD_HASH = :password_hash`,
-      [email, password_hash],
+       WHERE EMAIL = :email AND PASSWORD_HASH = :phash`,
+      { email, phash: password_hash },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
@@ -62,11 +71,10 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
     const token = createToken(user.USER_ID, user.ROLE);
-
     res.json({ success: true, data: user, token });
   } catch (err) {
     console.error('POST /users/login error:', err);
-    res.status(500).json({ success: false, message: 'Database error', error: err.message });
+    res.status(500).json({ success: false, message: err.message || 'Database error' });
   } finally {
     if (conn) await conn.close();
   }
@@ -82,38 +90,64 @@ router.get('/:id/favorites', async (req, res) => {
               ROUND(NVL(AVG(rv.RATING),0),1) AS AVG_RATING
        FROM FAVORITES f
        JOIN RESTAURANTS r ON f.RESTAURANT_ID = r.RESTAURANT_ID
-       LEFT JOIN REVIEWS rv ON r.RESTAURANT_ID = rv.RESTAURANT_ID
-       WHERE f.USER_ID = :id
+       LEFT JOIN REVIEWS rv ON r.RESTAURANT_ID = rv.RESTAURANT_ID AND rv.STATUS = 'APPROVED'
+       WHERE f.USER_ID = :usid
        GROUP BY r.RESTAURANT_ID, r.NAME, r.ADDRESS, r.PRICE_RANGE
        ORDER BY f.ADDED_AT DESC`,
-      [req.params.id],
+      { usid: Number(req.params.id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('GET /users/:id/favorites error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Database error' });
   } finally {
     if (conn) await conn.close();
   }
 });
 
-// POST /api/users/:id/favorites
+// POST /api/users/:id/favorites — auth required
 router.post('/:id/favorites', async (req, res) => {
   let conn;
   try {
-    conn = await getConnection();
+    const token = req.headers['x-auth-token'];
+    if (!token) return res.status(401).json({ success: false, message: 'Authentication required' });
+
+    const authUser = verifyToken(token);
+    if (!authUser) return res.status(401).json({ success: false, message: 'Invalid or expired session' });
+
+    if (authUser.userId !== parseInt(req.params.id, 10)) {
+      return res.status(403).json({ success: false, message: "Cannot modify another user's favorites" });
+    }
+
     const { restaurant_id } = req.body;
+    if (!restaurant_id) {
+      return res.status(400).json({ success: false, message: 'restaurant_id is required' });
+    }
+
+    conn = await getConnection();
+
+    const seqRes = await conn.execute(
+      `SELECT SEQ_FAVORITE_ID.NEXTVAL AS NID FROM DUAL`,
+      [],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const newId = seqRes.rows[0].NID;
+
+    // CRITICAL: :uid and :rid are Oracle reserved words — use :fvuid and :fvrid instead
     await conn.execute(
-      `INSERT INTO FAVORITES (USER_ID, RESTAURANT_ID) VALUES (:uid, :rid)`,
-      [req.params.id, restaurant_id],
+      `INSERT INTO FAVORITES (FAVORITE_ID, USER_ID, RESTAURANT_ID) VALUES (:fvid, :fvuid, :fvrid)`,
+      { fvid: newId, fvuid: Number(authUser.userId), fvrid: Number(restaurant_id) },
       { autoCommit: true }
     );
-    res.status(201).json({ success: true, message: 'Added to favorites' });
+
+    res.status(201).json({ success: true, message: 'Added to favourites' });
   } catch (err) {
-    if (err.errorNum === 1) {
-      return res.status(409).json({ success: false, message: 'Already in favorites' });
+    if (err.errorNum === 1 || (err.message && err.message.includes('ORA-00001'))) {
+      return res.status(409).json({ success: false, message: 'Already in favourites' });
     }
-    res.status(500).json({ success: false, error: err.message });
+    console.error('POST /users/:id/favorites error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Database error' });
   } finally {
     if (conn) await conn.close();
   }
