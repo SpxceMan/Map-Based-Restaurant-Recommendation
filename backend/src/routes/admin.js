@@ -28,6 +28,23 @@ router.get('/owners/pending', async (req, res) => {
   }
 });
 
+// GET /api/admin/owners/active
+router.get('/owners/active', async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `SELECT * FROM VW_ACTIVE_OWNERS ORDER BY CREATED_AT ASC`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
 // PUT /api/admin/owners/:id/approve
 router.put('/owners/:id/approve', async (req, res) => {
   let conn;
@@ -103,6 +120,23 @@ router.get('/pending', async (req, res) => {
   }
 });
 
+// GET /api/admin/restaurants/active — approved restaurants
+router.get('/restaurants/active', async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `SELECT * FROM VW_RESTAURANTS_WITH_RATING ORDER BY NAME ASC`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
 // PUT /api/admin/restaurants/:id/approve
 router.put('/restaurants/:id/approve', async (req, res) => {
   let conn;
@@ -150,60 +184,6 @@ router.delete('/restaurants/:id', async (req, res) => {
       { autoCommit: true }
     );
     res.json({ success: true, message: 'Restaurant deleted' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  } finally {
-    if (conn) await conn.close();
-  }
-});
-
-// ============================================================
-// PENDING REVIEWS
-// ============================================================
-
-router.get('/reviews/pending', async (req, res) => {
-  let conn;
-  try {
-    conn = await getConnection();
-    const result = await conn.execute(
-      `SELECT * FROM VW_PENDING_REVIEWS ORDER BY CREATED_AT ASC`,
-      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    res.json({ success: true, data: result.rows });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  } finally {
-    if (conn) await conn.close();
-  }
-});
-
-router.put('/reviews/:id/approve', async (req, res) => {
-  let conn;
-  try {
-    conn = await getConnection();
-    await conn.execute(
-      `BEGIN SP_APPROVE_REVIEW(:id); END;`,
-      { id: Number(req.params.id) },
-      { autoCommit: true }
-    );
-    res.json({ success: true, message: 'Review approved' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  } finally {
-    if (conn) await conn.close();
-  }
-});
-
-router.put('/reviews/:id/reject', async (req, res) => {
-  let conn;
-  try {
-    conn = await getConnection();
-    await conn.execute(
-      `BEGIN SP_REJECT_REVIEW(:id); END;`,
-      { id: Number(req.params.id) },
-      { autoCommit: true }
-    );
-    res.json({ success: true, message: 'Review rejected' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   } finally {
@@ -300,6 +280,41 @@ router.get('/users', async (req, res) => {
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+// GET /api/admin/users/all — list all active regular users
+router.get('/users/all', async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `SELECT * FROM VW_ALL_REGULAR_USERS ORDER BY CREATED_AT DESC`,
+      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
+// DELETE /api/admin/users/:id — remove user and their data
+router.delete('/users/:id', async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    await conn.execute(
+      `BEGIN SP_DELETE_USER(:id); END;`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
+    );
+    res.json({ success: true, message: 'User deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   } finally {

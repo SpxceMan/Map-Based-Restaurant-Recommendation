@@ -11,11 +11,13 @@ export default function AdminPage({ showToast }) {
 
   // Data states
   const [pendingOwners, setPendingOwners] = useState([])
+  const [activeOwners, setActiveOwners] = useState([])
   const [pendingRestaurants, setPendingRestaurants] = useState([])
-  const [pendingReviews, setPendingReviews] = useState([])
+  const [activeRestaurants, setActiveRestaurants] = useState([])
   const [updateRequests, setUpdateRequests] = useState([])
   const [invites, setInvites] = useState([])
   const [availableUsers, setAvailableUsers] = useState([])
+  const [allUsers, setAllUsers] = useState([])
 
   useEffect(() => {
     if (!user || user.ROLE !== 'ADMIN') { navigate('/'); return }
@@ -25,20 +27,24 @@ export default function AdminPage({ showToast }) {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [ownRes, restRes, revRes, urRes, invRes, usrRes] = await Promise.all([
+      const [ownRes, aOwnRes, restRes, aRestRes, urRes, invRes, usrRes, allUsrRes] = await Promise.all([
         adminService.getPendingOwners(),
+        adminService.getActiveOwners(),
         adminService.getPending(),
-        adminService.getPendingReviews(),
+        adminService.getActiveRestaurants(),
         adminService.getUpdateRequests(),
         adminService.getInvites(),
         adminService.getUsers(),
+        adminService.getAllUsers()
       ])
       setPendingOwners(ownRes.data || [])
+      setActiveOwners(aOwnRes.data || [])
       setPendingRestaurants(restRes.data || [])
-      setPendingReviews(revRes.data || [])
+      setActiveRestaurants(aRestRes.data || [])
       setUpdateRequests(urRes.data || [])
       setInvites(invRes.data || [])
       setAvailableUsers(usrRes.data || [])
+      setAllUsers(allUsrRes.data || [])
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -48,7 +54,7 @@ export default function AdminPage({ showToast }) {
 
   // Owner actions
   const handleApproveOwner = async (id) => {
-    try { await adminService.approveOwner(id); showToast('Owner approved ✓'); setPendingOwners(prev => prev.filter(o => o.USER_ID !== id)) }
+    try { await adminService.approveOwner(id); showToast('Owner approved ✓'); fetchAll() }
     catch (err) { showToast(err.message, 'error') }
   }
   const handleRejectOwner = async (id) => {
@@ -63,7 +69,7 @@ export default function AdminPage({ showToast }) {
 
   // Restaurant actions
   const handleApprove = async (id) => {
-    try { await adminService.approve(id); showToast('Restaurant approved ✓'); setPendingRestaurants(prev => prev.filter(r => r.RESTAURANT_ID !== id)) }
+    try { await adminService.approve(id); showToast('Restaurant approved ✓'); fetchAll() }
     catch (err) { showToast(err.message, 'error') }
   }
   const handleReject = async (id) => {
@@ -72,17 +78,14 @@ export default function AdminPage({ showToast }) {
   }
   const handleDelete = async (id) => {
     if (!window.confirm('Permanently delete this restaurant?')) return
-    try { await adminService.delete(id); showToast('Restaurant deleted'); setPendingRestaurants(prev => prev.filter(r => r.RESTAURANT_ID !== id)) }
+    try { await adminService.delete(id); showToast('Restaurant deleted'); fetchAll() }
     catch (err) { showToast(err.message, 'error') }
   }
 
-  // Review actions
-  const handleApproveReview = async (id) => {
-    try { await adminService.approveReview(id); showToast('Review approved ✓'); setPendingReviews(prev => prev.filter(r => r.REVIEW_ID !== id)) }
-    catch (err) { showToast(err.message, 'error') }
-  }
-  const handleRejectReview = async (id) => {
-    try { await adminService.rejectReview(id); showToast('Review rejected'); setPendingReviews(prev => prev.filter(r => r.REVIEW_ID !== id)) }
+  // User actions
+  const handleDeleteUser = async (id) => {
+    if (!window.confirm('Delete this user and all their data?')) return
+    try { await adminService.deleteUser(id); showToast('User deleted'); fetchAll() }
     catch (err) { showToast(err.message, 'error') }
   }
 
@@ -141,8 +144,8 @@ export default function AdminPage({ showToast }) {
           {[
             { n: pendingOwners.length, l: 'Pending Owners' },
             { n: pendingRestaurants.length, l: 'Pending Restaurants' },
-            { n: pendingReviews.length, l: 'Pending Reviews' },
             { n: updateRequests.length, l: 'Update Requests' },
+            { n: allUsers.length, l: 'Total Users' },
           ].map(s => (
             <div key={s.l}>
               <div style={{ fontSize: '1.75rem', fontWeight: 700, color: 'var(--terracotta)', fontFamily: 'var(--font-display)' }}>{s.n}</div>
@@ -159,8 +162,8 @@ export default function AdminPage({ showToast }) {
           <button style={tabStyle(tab === 'restaurants')} onClick={() => setTab('restaurants')}>
             🏪 Restaurants {badge(pendingRestaurants.length)}
           </button>
-          <button style={tabStyle(tab === 'reviews')} onClick={() => setTab('reviews')}>
-            ✍️ Reviews {badge(pendingReviews.length)}
+          <button style={tabStyle(tab === 'users')} onClick={() => setTab('users')}>
+            👥 Users
           </button>
           <button style={tabStyle(tab === 'updates')} onClick={() => setTab('updates')}>
             📝 Updates {badge(updateRequests.length)}
@@ -181,9 +184,9 @@ export default function AdminPage({ showToast }) {
                   Pending Owner Accounts
                 </h3>
                 {pendingOwners.length === 0 ? (
-                  <div className="empty-state"><div className="icon">✅</div><p>No pending owners.</p></div>
+                  <div className="empty-state" style={{ padding: '1.5rem' }}><div className="icon">✅</div><p>No pending owners.</p></div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
                     <table className="admin-table">
                       <thead>
                         <tr>
@@ -216,6 +219,40 @@ export default function AdminPage({ showToast }) {
                     </table>
                   </div>
                 )}
+
+                <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '1rem', marginTop: '2.5rem', color: 'var(--charcoal)' }}>
+                  Active Owners
+                </h3>
+                {activeOwners.length === 0 ? (
+                  <div className="empty-state" style={{ padding: '1.5rem' }}><p>No active owners.</p></div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Username</th>
+                          <th>Email</th>
+                          <th>Registered</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeOwners.map(o => (
+                          <tr key={o.USER_ID}>
+                            <td><strong>{o.USERNAME}</strong></td>
+                            <td>{o.EMAIL}</td>
+                            <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                              {o.CREATED_AT ? new Date(o.CREATED_AT).toLocaleDateString() : '—'}
+                            </td>
+                            <td>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDeleteOwner(o.USER_ID)}>🗑 Delete Owner</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )}
 
@@ -226,9 +263,9 @@ export default function AdminPage({ showToast }) {
                   Pending Restaurant Submissions
                 </h3>
                 {pendingRestaurants.length === 0 ? (
-                  <div className="empty-state"><div className="icon">✅</div><p>No pending restaurants.</p></div>
+                  <div className="empty-state" style={{ padding: '1.5rem' }}><div className="icon">✅</div><p>No pending restaurants.</p></div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
                     <table className="admin-table">
                       <thead>
                         <tr><th>Name</th><th>Address</th><th>Price</th><th>Submitted by</th><th>Date</th><th>Actions</th></tr>
@@ -254,38 +291,58 @@ export default function AdminPage({ showToast }) {
                     </table>
                   </div>
                 )}
-              </>
-            )}
 
-            {/* ============ REVIEWS TAB ============ */}
-            {tab === 'reviews' && (
-              <>
-                <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '1rem', color: 'var(--charcoal)' }}>
-                  Pending Review Submissions
+                <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '1rem', marginTop: '2.5rem', color: 'var(--charcoal)' }}>
+                  Active Restaurants
                 </h3>
-                {pendingReviews.length === 0 ? (
-                  <div className="empty-state"><div className="icon">✅</div><p>No pending reviews.</p></div>
+                {activeRestaurants.length === 0 ? (
+                  <div className="empty-state" style={{ padding: '1.5rem' }}><p>No active restaurants.</p></div>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
                     <table className="admin-table">
                       <thead>
-                        <tr><th>Restaurant</th><th>Reviewer</th><th>Rating</th><th>Comment</th><th>Date</th><th>Actions</th></tr>
+                        <tr><th>Name</th><th>Address</th><th>Rating</th><th>Actions</th></tr>
                       </thead>
                       <tbody>
-                        {pendingReviews.map(r => (
-                          <tr key={r.REVIEW_ID}>
-                            <td><strong>{r.RESTAURANT_NAME}</strong></td>
-                            <td>{r.REVIEWER}</td>
-                            <td><span style={{ color: 'var(--gold)', fontWeight: 700 }}>{'★'.repeat(Math.round(r.RATING))}</span> {r.RATING}</td>
-                            <td style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {r.REVIEW_TEXT || <em style={{ color: 'var(--text-muted)' }}>No comment</em>}
-                            </td>
-                            <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{r.CREATED_AT ? new Date(r.CREATED_AT).toLocaleDateString() : '—'}</td>
+                        {activeRestaurants.map(r => (
+                          <tr key={r.RESTAURANT_ID}>
+                            <td><strong>{r.NAME}</strong></td>
+                            <td style={{ maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ADDRESS}</td>
+                            <td><span style={{ color: 'var(--gold)' }}>★</span> {r.AVG_RATING}</td>
                             <td>
-                              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                <button className="btn btn-primary btn-sm" onClick={() => handleApproveReview(r.REVIEW_ID)}>✓ Approve</button>
-                                <button className="btn btn-ghost btn-sm" onClick={() => handleRejectReview(r.REVIEW_ID)}>✕ Reject</button>
-                              </div>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDelete(r.RESTAURANT_ID)}>🗑 Delete Restaurant</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ============ USERS TAB ============ */}
+            {tab === 'users' && (
+              <>
+                <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '1rem', color: 'var(--charcoal)' }}>
+                  Manage Active Users
+                </h3>
+                {allUsers.length === 0 ? (
+                  <div className="empty-state"><div className="icon">👥</div><p>No active users.</p></div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr><th>Username</th><th>Email</th><th>Registered</th><th>Actions</th></tr>
+                      </thead>
+                      <tbody>
+                        {allUsers.map(u => (
+                          <tr key={u.USER_ID}>
+                            <td><strong>{u.USERNAME}</strong></td>
+                            <td>{u.EMAIL}</td>
+                            <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{u.CREATED_AT ? new Date(u.CREATED_AT).toLocaleDateString() : '—'}</td>
+                            <td>
+                              <button className="btn btn-danger btn-sm" onClick={() => handleDeleteUser(u.USER_ID)}>🗑 Delete User</button>
                             </td>
                           </tr>
                         ))}

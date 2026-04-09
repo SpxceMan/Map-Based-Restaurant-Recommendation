@@ -48,15 +48,13 @@ export const eventService = {
 export const adminService = {
   // Restaurants
   getPending: () => api.get('/admin/pending'),
+  getActiveRestaurants: () => api.get('/admin/restaurants/active'),
   approve: (id) => api.put(`/admin/restaurants/${id}/approve`),
   reject: (id) => api.put(`/admin/restaurants/${id}/reject`),
   delete: (id) => api.delete(`/admin/restaurants/${id}`),
-  // Reviews
-  getPendingReviews: () => api.get('/admin/reviews/pending'),
-  approveReview: (id) => api.put(`/admin/reviews/${id}/approve`),
-  rejectReview: (id) => api.put(`/admin/reviews/${id}/reject`),
   // Owners
   getPendingOwners: () => api.get('/admin/owners/pending'),
+  getActiveOwners: () => api.get('/admin/owners/active'),
   approveOwner: (id) => api.put(`/admin/owners/${id}/approve`),
   rejectOwner: (id) => api.put(`/admin/owners/${id}/reject`),
   deleteOwner: (id) => api.delete(`/admin/owners/${id}`),
@@ -64,8 +62,10 @@ export const adminService = {
   getUpdateRequests: () => api.get('/admin/update-requests'),
   approveUpdate: (id) => api.put(`/admin/update-requests/${id}/approve`),
   rejectUpdate: (id) => api.put(`/admin/update-requests/${id}/reject`),
-  // Admin invites
-  getUsers: () => api.get('/admin/users'),
+  // Admin invites & Users
+  getUsers: () => api.get('/admin/users'), // for invites
+  getAllUsers: () => api.get('/admin/users/all'), // for management
+  deleteUser: (id) => api.delete(`/admin/users/${id}`),
   sendInvite: (userId) => api.post('/admin/invites', { user_id: userId }),
   getInvites: () => api.get('/admin/invites'),
 }
