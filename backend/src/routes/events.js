@@ -143,4 +143,51 @@ router.delete('/:id', requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/events/:id — owner updates event
+router.put('/:id', requireAuth, async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    const user_id = req.authUser.userId;
+    const user_role = req.authUser.role;
+    const event_id = Number(req.params.id);
+    const { event_name, description, event_date, status } = req.body;
+
+    // Check event ownership
+    if (user_role === 'OWNER') {
+      const ownerResult = await conn.execute(
+        `SELECT FN_EVENT_OWNER(:evid) AS OWNER_ID FROM DUAL`,
+        { evid: event_id },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const eventOwnerId = ownerResult.rows[0].OWNER_ID;
+
+      if (eventOwnerId === null) {
+        return res.status(404).json({ success: false, message: 'Event not found' });
+      }
+      if (eventOwnerId !== user_id) {
+        return res.status(403).json({ success: false, message: 'You can only update your own events' });
+      }
+    }
+
+    await conn.execute(
+      `BEGIN SP_UPDATE_EVENT(:evid, :enm, :edesc, :edt, :estatus); END;`,
+      {
+        evid: event_id,
+        enm: event_name,
+        edesc: description || null,
+        edt: event_date,
+        estatus: status || 'UPCOMING'
+      },
+      { autoCommit: true }
+    );
+    res.json({ success: true, message: 'Event updated successfully' });
+  } catch (err) {
+    console.error('PUT /events/:id error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Database error' });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
 module.exports = router;

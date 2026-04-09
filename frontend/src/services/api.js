@@ -42,6 +42,7 @@ export const eventService = {
   getAll: () => api.get('/events'),
   getByRestaurant: (id) => api.get(`/events/restaurant/${id}`),
   create: (data) => api.post('/events', data),
+  update: (id, data) => api.put(`/events/${id}`, data),
   delete: (id) => api.delete(`/events/${id}`),
 }
 
