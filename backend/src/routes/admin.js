@@ -17,10 +17,7 @@ router.get('/owners/pending', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT USER_ID, USERNAME, EMAIL, LICENSE_NUMBER, CREATED_AT
-       FROM USERS
-       WHERE ROLE = 'OWNER' AND STATUS = 'PENDING'
-       ORDER BY CREATED_AT ASC`,
+      `SELECT * FROM VW_PENDING_OWNERS ORDER BY CREATED_AT ASC`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
@@ -37,7 +34,7 @@ router.put('/owners/:id/approve', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE USERS SET STATUS = 'APPROVED' WHERE USER_ID = :usid AND ROLE = 'OWNER'`,
+      `BEGIN SP_APPROVE_OWNER(:usid); END;`,
       { usid: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -55,7 +52,7 @@ router.put('/owners/:id/reject', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE USERS SET STATUS = 'REJECTED' WHERE USER_ID = :usid AND ROLE = 'OWNER'`,
+      `BEGIN SP_REJECT_OWNER(:usid); END;`,
       { usid: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -72,28 +69,13 @@ router.delete('/owners/:id', async (req, res) => {
   let conn;
   try {
     conn = await getConnection();
-    const id = Number(req.params.id);
-    // Delete owner's restaurants (cascades to reviews, favorites, events, etc)
-    await conn.execute(`DELETE FROM EVENTS WHERE OWNER_ID = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM UPDATE_REQUESTS WHERE OWNER_ID = :id`, { id }, { autoCommit: false });
     await conn.execute(
-      `DELETE FROM FAVORITES WHERE RESTAURANT_ID IN (SELECT RESTAURANT_ID FROM RESTAURANTS WHERE ADDED_BY = :id)`,
-      { id }, { autoCommit: false }
+      `BEGIN SP_DELETE_OWNER(:id); END;`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
     );
-    await conn.execute(
-      `DELETE FROM REVIEWS WHERE RESTAURANT_ID IN (SELECT RESTAURANT_ID FROM RESTAURANTS WHERE ADDED_BY = :id)`,
-      { id }, { autoCommit: false }
-    );
-    await conn.execute(
-      `DELETE FROM RESTAURANT_CUISINE WHERE RESTAURANT_ID IN (SELECT RESTAURANT_ID FROM RESTAURANTS WHERE ADDED_BY = :id)`,
-      { id }, { autoCommit: false }
-    );
-    await conn.execute(`DELETE FROM RESTAURANTS WHERE ADDED_BY = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM USERS WHERE USER_ID = :id AND ROLE = 'OWNER'`, { id }, { autoCommit: false });
-    await conn.commit();
     res.json({ success: true, message: 'Owner and their restaurants deleted' });
   } catch (err) {
-    if (conn) { try { await conn.rollback(); } catch (_) {} }
     res.status(500).json({ success: false, message: err.message });
   } finally {
     if (conn) await conn.close();
@@ -110,13 +92,7 @@ router.get('/pending', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT r.RESTAURANT_ID, r.NAME, r.ADDRESS, r.LATITUDE, r.LONGITUDE,
-              r.PRICE_RANGE, r.PHONE, r.WEBSITE, r.CREATED_AT,
-              u.USERNAME AS SUBMITTED_BY
-       FROM RESTAURANTS r
-       LEFT JOIN USERS u ON r.ADDED_BY = u.USER_ID
-       WHERE r.STATUS = 'PENDING'
-       ORDER BY r.CREATED_AT ASC`,
+      `SELECT * FROM VW_PENDING_RESTAURANTS ORDER BY CREATED_AT ASC`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
@@ -133,7 +109,7 @@ router.put('/restaurants/:id/approve', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE RESTAURANTS SET STATUS = 'APPROVED' WHERE RESTAURANT_ID = :id`,
+      `BEGIN SP_APPROVE_RESTAURANT(:id); END;`,
       { id: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -151,7 +127,7 @@ router.put('/restaurants/:id/reject', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE RESTAURANTS SET STATUS = 'REJECTED' WHERE RESTAURANT_ID = :id`,
+      `BEGIN SP_REJECT_RESTAURANT(:id); END;`,
       { id: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -168,17 +144,13 @@ router.delete('/restaurants/:id', async (req, res) => {
   let conn;
   try {
     conn = await getConnection();
-    const id = Number(req.params.id);
-    await conn.execute(`DELETE FROM EVENTS WHERE RESTAURANT_ID = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM UPDATE_REQUESTS WHERE RESTAURANT_ID = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM FAVORITES WHERE RESTAURANT_ID = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM REVIEWS WHERE RESTAURANT_ID = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM RESTAURANT_CUISINE WHERE RESTAURANT_ID = :id`, { id }, { autoCommit: false });
-    await conn.execute(`DELETE FROM RESTAURANTS WHERE RESTAURANT_ID = :id`, { id }, { autoCommit: false });
-    await conn.commit();
+    await conn.execute(
+      `BEGIN SP_DELETE_RESTAURANT(:id); END;`,
+      { id: Number(req.params.id) },
+      { autoCommit: true }
+    );
     res.json({ success: true, message: 'Restaurant deleted' });
   } catch (err) {
-    if (conn) { try { await conn.rollback(); } catch (_) {} }
     res.status(500).json({ success: false, message: err.message });
   } finally {
     if (conn) await conn.close();
@@ -194,15 +166,7 @@ router.get('/reviews/pending', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT rv.REVIEW_ID, rv.RATING, rv.REVIEW_TEXT, rv.CREATED_AT,
-              rv.STATUS AS REVIEW_STATUS,
-              u.USERNAME AS REVIEWER,
-              r.NAME AS RESTAURANT_NAME, r.RESTAURANT_ID
-       FROM REVIEWS rv
-       JOIN USERS u ON rv.USER_ID = u.USER_ID
-       JOIN RESTAURANTS r ON rv.RESTAURANT_ID = r.RESTAURANT_ID
-       WHERE rv.STATUS = 'PENDING'
-       ORDER BY rv.CREATED_AT ASC`,
+      `SELECT * FROM VW_PENDING_REVIEWS ORDER BY CREATED_AT ASC`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
@@ -218,7 +182,7 @@ router.put('/reviews/:id/approve', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE REVIEWS SET STATUS = 'APPROVED' WHERE REVIEW_ID = :id`,
+      `BEGIN SP_APPROVE_REVIEW(:id); END;`,
       { id: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -235,7 +199,7 @@ router.put('/reviews/:id/reject', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE REVIEWS SET STATUS = 'REJECTED' WHERE REVIEW_ID = :id`,
+      `BEGIN SP_REJECT_REVIEW(:id); END;`,
       { id: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -257,15 +221,7 @@ router.get('/update-requests', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT ur.REQUEST_ID, ur.RESTAURANT_ID, ur.FIELD_NAME,
-              ur.OLD_VALUE, ur.NEW_VALUE, ur.STATUS, ur.CREATED_AT,
-              r.NAME AS RESTAURANT_NAME,
-              u.USERNAME AS OWNER_NAME
-       FROM UPDATE_REQUESTS ur
-       JOIN RESTAURANTS r ON ur.RESTAURANT_ID = r.RESTAURANT_ID
-       JOIN USERS u ON ur.OWNER_ID = u.USER_ID
-       WHERE ur.STATUS = 'PENDING'
-       ORDER BY ur.CREATED_AT ASC`,
+      `SELECT * FROM VW_PENDING_UPDATE_REQUESTS ORDER BY CREATED_AT ASC`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
@@ -283,40 +239,27 @@ router.put('/update-requests/:id/approve', async (req, res) => {
     conn = await getConnection();
     const reqId = Number(req.params.id);
 
-    // Get the request details
-    const reqRes = await conn.execute(
-      `SELECT RESTAURANT_ID, FIELD_NAME, NEW_VALUE FROM UPDATE_REQUESTS WHERE REQUEST_ID = :reqid AND STATUS = 'PENDING'`,
-      { reqid: reqId },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    const result = await conn.execute(
+      `BEGIN SP_APPLY_UPDATE_REQUEST(:reqid, :status, :field_name); END;`,
+      {
+        reqid: reqId,
+        status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+        field_name: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 50 }
+      },
+      { autoCommit: true }
     );
-    if (reqRes.rows.length === 0) {
+
+    const status = result.outBinds.status;
+    const fieldName = result.outBinds.field_name;
+
+    if (status === 'NOT_FOUND') {
       return res.status(404).json({ success: false, message: 'Update request not found' });
     }
-
-    const { RESTAURANT_ID, FIELD_NAME, NEW_VALUE } = reqRes.rows[0];
-
-    // Whitelist of updatable fields to prevent SQL injection
-    const allowedFields = ['NAME', 'ADDRESS', 'PHONE', 'WEBSITE', 'PRICE_RANGE'];
-    if (!allowedFields.includes(FIELD_NAME)) {
+    if (status === 'INVALID_FIELD') {
       return res.status(400).json({ success: false, message: 'Invalid field name' });
     }
 
-    // Apply the update
-    await conn.execute(
-      `UPDATE RESTAURANTS SET ${FIELD_NAME} = :newval WHERE RESTAURANT_ID = :rsid`,
-      { newval: NEW_VALUE, rsid: RESTAURANT_ID },
-      { autoCommit: false }
-    );
-
-    // Mark request as approved
-    await conn.execute(
-      `UPDATE UPDATE_REQUESTS SET STATUS = 'APPROVED' WHERE REQUEST_ID = :reqid`,
-      { reqid: reqId },
-      { autoCommit: false }
-    );
-
-    await conn.commit();
-    res.json({ success: true, message: `${FIELD_NAME} updated successfully` });
+    res.json({ success: true, message: `${fieldName} updated successfully` });
   } catch (err) {
     if (conn) { try { await conn.rollback(); } catch (_) {} }
     res.status(500).json({ success: false, message: err.message });
@@ -331,7 +274,7 @@ router.put('/update-requests/:id/reject', async (req, res) => {
   try {
     conn = await getConnection();
     await conn.execute(
-      `UPDATE UPDATE_REQUESTS SET STATUS = 'REJECTED' WHERE REQUEST_ID = :reqid`,
+      `BEGIN SP_REJECT_UPDATE_REQUEST(:reqid); END;`,
       { reqid: Number(req.params.id) },
       { autoCommit: true }
     );
@@ -353,13 +296,7 @@ router.get('/users', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT u.USER_ID, u.USERNAME, u.EMAIL, u.ROLE, u.CREATED_AT
-       FROM USERS u
-       WHERE u.ROLE = 'USER' AND u.STATUS = 'APPROVED'
-       AND u.USER_ID NOT IN (
-         SELECT INVITEE_ID FROM ADMIN_INVITES WHERE STATUS = 'PENDING'
-       )
-       ORDER BY u.USERNAME ASC`,
+      `SELECT * FROM VW_INVITABLE_USERS ORDER BY USERNAME ASC`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });
@@ -382,29 +319,29 @@ router.post('/invites', async (req, res) => {
       return res.status(400).json({ success: false, message: 'user_id is required' });
     }
 
-    // Check user exists and is a regular USER
-    const userCheck = await conn.execute(
-      `SELECT ROLE FROM USERS WHERE USER_ID = :usid`,
+    // Check user role using function
+    const roleResult = await conn.execute(
+      `SELECT FN_GET_USER_ROLE(:usid) AS ROLE FROM DUAL`,
       { usid: Number(user_id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    if (userCheck.rows.length === 0) {
+    const userRole = roleResult.rows[0].ROLE;
+
+    if (userRole === null) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    if (userCheck.rows[0].ROLE !== 'USER') {
+    if (userRole !== 'USER') {
       return res.status(400).json({ success: false, message: 'Can only invite regular users' });
     }
 
-    const seqRes = await conn.execute(
-      `SELECT SEQ_INVITE_ID.NEXTVAL AS NID FROM DUAL`,
-      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const newId = seqRes.rows[0].NID;
-
+    // Send invite using procedure
     await conn.execute(
-      `INSERT INTO ADMIN_INVITES (INVITE_ID, INVITEE_ID, INVITED_BY, STATUS)
-       VALUES (:invid, :invtee, :invby, 'PENDING')`,
-      { invid: newId, invtee: Number(user_id), invby: Number(invitedBy) },
+      `BEGIN SP_SEND_ADMIN_INVITE(:invtee, :invby, :new_id); END;`,
+      {
+        invtee: Number(user_id),
+        invby: Number(invitedBy),
+        new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+      },
       { autoCommit: true }
     );
 
@@ -426,13 +363,7 @@ router.get('/invites', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT ai.INVITE_ID, ai.STATUS, ai.CREATED_AT,
-              u1.USERNAME AS INVITEE_NAME, u1.EMAIL AS INVITEE_EMAIL,
-              u2.USERNAME AS INVITED_BY_NAME
-       FROM ADMIN_INVITES ai
-       JOIN USERS u1 ON ai.INVITEE_ID = u1.USER_ID
-       JOIN USERS u2 ON ai.INVITED_BY = u2.USER_ID
-       ORDER BY ai.CREATED_AT DESC`,
+      `SELECT * FROM VW_ALL_INVITES ORDER BY CREATED_AT DESC`,
       [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });

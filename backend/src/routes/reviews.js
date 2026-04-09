@@ -26,58 +26,53 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
     }
 
-    // CRITICAL: :uid is an Oracle reserved word (pseudocolumn = current session user ID).
-    // :rid is also potentially unsafe. Use fully prefixed unique names: :rvrid, :rvuid etc.
-    const restCheck = await conn.execute(
-      `SELECT STATUS FROM RESTAURANTS WHERE RESTAURANT_ID = :rvrid`,
-      { rvrid: Number(restaurant_id) },
+    // Check restaurant status using function
+    const statusResult = await conn.execute(
+      `SELECT FN_RESTAURANT_STATUS(:rsid) AS STATUS FROM DUAL`,
+      { rsid: Number(restaurant_id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    if (restCheck.rows.length === 0) {
+    const restStatus = statusResult.rows[0].STATUS;
+
+    if (restStatus === null) {
       return res.status(404).json({ success: false, message: 'Restaurant not found' });
     }
-    if (restCheck.rows[0].STATUS !== 'APPROVED') {
+    if (restStatus !== 'APPROVED') {
       return res.status(400).json({ success: false, message: 'Cannot review a non-approved restaurant' });
     }
 
-    const dupCheck = await conn.execute(
-      `SELECT REVIEW_ID FROM REVIEWS WHERE RESTAURANT_ID = :rvrid AND USER_ID = :rvuid`,
-      { rvrid: Number(restaurant_id), rvuid: Number(user_id) },
+    // Check if review already exists using function
+    const existsResult = await conn.execute(
+      `SELECT FN_REVIEW_EXISTS(:rsid, :usid) AS REVIEW_ID FROM DUAL`,
+      { rsid: Number(restaurant_id), usid: Number(user_id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
+    const existingReviewId = existsResult.rows[0].REVIEW_ID;
 
-    if (dupCheck.rows.length > 0) {
+    if (existingReviewId > 0) {
+      // Update existing review using procedure
       await conn.execute(
-        `UPDATE REVIEWS
-         SET RATING = :rvrat, REVIEW_TEXT = :rvtxt, STATUS = 'APPROVED', CREATED_AT = SYSTIMESTAMP
-         WHERE RESTAURANT_ID = :rvrid AND USER_ID = :rvuid`,
+        `BEGIN SP_UPDATE_REVIEW(:rsid, :usid, :rating, :rtxt); END;`,
         {
-          rvrat: ratingNum,
-          rvtxt: comment || null,
-          rvrid: Number(restaurant_id),
-          rvuid: Number(user_id)
+          rsid: Number(restaurant_id),
+          usid: Number(user_id),
+          rating: ratingNum,
+          rtxt: comment || null
         },
         { autoCommit: true }
       );
       return res.json({ success: true, message: 'Review updated successfully' });
     }
 
-    const seqRes = await conn.execute(
-      `SELECT SEQ_REVIEW_ID.NEXTVAL AS NID FROM DUAL`,
-      [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const newId = seqRes.rows[0].NID;
-
+    // Add new review using procedure
     await conn.execute(
-      `INSERT INTO REVIEWS (REVIEW_ID, RESTAURANT_ID, USER_ID, RATING, REVIEW_TEXT, STATUS)
-       VALUES (:rvid, :rvrid, :rvuid, :rvrat, :rvtxt, 'APPROVED')`,
+      `BEGIN SP_ADD_REVIEW(:rsid, :usid, :rating, :rtxt, :new_id); END;`,
       {
-        rvid:  newId,
-        rvrid: Number(restaurant_id),
-        rvuid: Number(user_id),
-        rvrat: ratingNum,
-        rvtxt: comment || null
+        rsid: Number(restaurant_id),
+        usid: Number(user_id),
+        rating: ratingNum,
+        rtxt: comment || null,
+        new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
       },
       { autoCommit: true }
     );
@@ -97,13 +92,11 @@ router.get('/restaurant/:id', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT rv.REVIEW_ID, rv.RATING, rv.REVIEW_TEXT AS "REVIEW_COMMENT", rv.CREATED_AT,
-              u.USERNAME, u.USER_ID
-       FROM REVIEWS rv
-       JOIN USERS u ON rv.USER_ID = u.USER_ID
-       WHERE rv.RESTAURANT_ID = :rvrid AND rv.STATUS = 'APPROVED'
-       ORDER BY rv.CREATED_AT DESC`,
-      { rvrid: Number(req.params.id) },
+      `SELECT REVIEW_ID, RATING, REVIEW_COMMENT, CREATED_AT, USERNAME, USER_ID
+       FROM VW_RESTAURANT_REVIEWS
+       WHERE RESTAURANT_ID = :rsid
+       ORDER BY CREATED_AT DESC`,
+      { rsid: Number(req.params.id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     res.json({ success: true, data: result.rows });

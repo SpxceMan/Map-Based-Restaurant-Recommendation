@@ -298,5 +298,8 @@ END;
 /
 
 -- =============================================================
+-- NOTE: After running this file, run procedures.sql to create
+-- all Views, Functions, Triggers, and Stored Procedures.
+-- =============================================================
 
 SELECT TABLE_NAME FROM USER_TABLES ORDER BY TABLE_NAME;

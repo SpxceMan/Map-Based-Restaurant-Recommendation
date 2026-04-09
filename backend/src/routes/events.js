@@ -10,13 +10,7 @@ router.get('/', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT e.EVENT_ID, e.RESTAURANT_ID, e.EVENT_NAME, e.DESCRIPTION,
-              e.EVENT_DATE, e.STATUS,
-              r.NAME AS RESTAURANT_NAME
-       FROM EVENTS e
-       JOIN RESTAURANTS r ON e.RESTAURANT_ID = r.RESTAURANT_ID
-       WHERE e.STATUS IN ('UPCOMING', 'ONGOING') AND r.STATUS = 'APPROVED'
-       ORDER BY e.EVENT_DATE ASC`,
+      `SELECT * FROM VW_ACTIVE_EVENTS ORDER BY EVENT_DATE ASC`,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -36,7 +30,7 @@ router.get('/restaurant/:id', async (req, res) => {
     conn = await getConnection();
     const result = await conn.execute(
       `SELECT EVENT_ID, EVENT_NAME, DESCRIPTION, EVENT_DATE, STATUS, CREATED_AT
-       FROM EVENTS
+       FROM VW_RESTAURANT_EVENTS
        WHERE RESTAURANT_ID = :rsid
        ORDER BY EVENT_DATE ASC`,
       { rsid: Number(req.params.id) },
@@ -68,41 +62,38 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'restaurant_id, event_name, and event_date are required' });
     }
 
-    // Verify the owner owns this restaurant
+    // Verify the owner owns this restaurant using function
     if (user_role === 'OWNER') {
-      const ownerCheck = await conn.execute(
-        `SELECT ADDED_BY FROM RESTAURANTS WHERE RESTAURANT_ID = :rsid AND STATUS = 'APPROVED'`,
+      const ownerResult = await conn.execute(
+        `SELECT FN_RESTAURANT_OWNER(:rsid) AS OWNER_ID FROM DUAL`,
         { rsid: Number(restaurant_id) },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
-      if (ownerCheck.rows.length === 0) {
+      const ownerId = ownerResult.rows[0].OWNER_ID;
+
+      if (ownerId === null) {
         return res.status(404).json({ success: false, message: 'Restaurant not found' });
       }
-      if (ownerCheck.rows[0].ADDED_BY !== user_id) {
+      if (ownerId !== user_id) {
         return res.status(403).json({ success: false, message: 'You can only create events for your own restaurants' });
       }
     }
 
-    const seqRes = await conn.execute(
-      `SELECT SEQ_EVENT_ID.NEXTVAL AS NID FROM DUAL`,
-      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const newId = seqRes.rows[0].NID;
-
-    await conn.execute(
-      `INSERT INTO EVENTS (EVENT_ID, RESTAURANT_ID, OWNER_ID, EVENT_NAME, DESCRIPTION, EVENT_DATE, STATUS)
-       VALUES (:evid, :rsid, :owid, :evnm, :evdesc, TO_DATE(:evdt, 'YYYY-MM-DD'), 'UPCOMING')`,
+    // Create event using procedure
+    const result = await conn.execute(
+      `BEGIN SP_ADD_EVENT(:rsid, :owid, :evnm, :evdesc, :evdt, :new_id); END;`,
       {
-        evid: newId,
         rsid: Number(restaurant_id),
         owid: Number(user_id),
         evnm: event_name,
         evdesc: description || null,
-        evdt: event_date
+        evdt: event_date,
+        new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
       },
       { autoCommit: true }
     );
 
+    const newId = result.outBinds.new_id;
     res.status(201).json({ success: true, message: 'Event created!', event_id: newId });
   } catch (err) {
     console.error('POST /events error:', err);
@@ -120,20 +111,26 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const user_id = req.authUser.userId;
     const user_role = req.authUser.role;
 
+    // Check event ownership using function (only for OWNER role)
     if (user_role === 'OWNER') {
-      const check = await conn.execute(
-        `SELECT OWNER_ID FROM EVENTS WHERE EVENT_ID = :evid`,
+      const ownerResult = await conn.execute(
+        `SELECT FN_EVENT_OWNER(:evid) AS OWNER_ID FROM DUAL`,
         { evid: Number(req.params.id) },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
-      if (check.rows.length === 0) return res.status(404).json({ success: false, message: 'Event not found' });
-      if (check.rows[0].OWNER_ID !== user_id) {
+      const eventOwnerId = ownerResult.rows[0].OWNER_ID;
+
+      if (eventOwnerId === null) {
+        return res.status(404).json({ success: false, message: 'Event not found' });
+      }
+      if (eventOwnerId !== user_id) {
         return res.status(403).json({ success: false, message: 'You can only delete your own events' });
       }
     }
 
+    // Delete event using procedure
     await conn.execute(
-      `DELETE FROM EVENTS WHERE EVENT_ID = :evid`,
+      `BEGIN SP_DELETE_EVENT(:evid); END;`,
       { evid: Number(req.params.id) },
       { autoCommit: true }
     );

@@ -21,36 +21,34 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, message: 'License number is required for owner accounts' });
     }
 
+    // Check if email/username already exists using function
     const check = await conn.execute(
-      `SELECT USER_ID FROM USERS WHERE EMAIL = :email OR USERNAME = :uname`,
+      `SELECT FN_USER_EXISTS(:email, :uname) AS CNT FROM DUAL`,
       { email, uname: username },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    if (check.rows.length > 0) {
+    if (check.rows[0].CNT > 0) {
       return res.status(409).json({ success: false, message: 'Email or username already exists' });
     }
-
-    const seqRes = await conn.execute(
-      `SELECT SEQ_USER_ID.NEXTVAL AS NID FROM DUAL`,
-      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const newId = seqRes.rows[0].NID;
 
     // Owners start as PENDING, regular users are APPROVED immediately
     const userStatus = userRole === 'OWNER' ? 'PENDING' : 'APPROVED';
 
-    await conn.execute(
-      `INSERT INTO USERS (USER_ID, USERNAME, EMAIL, PASSWORD_HASH, ROLE, LICENSE_NUMBER, STATUS)
-       VALUES (:usid, :uname, :email, :phash, :urole, :licno, :ustatus)`,
+    // Register user using procedure
+    const result = await conn.execute(
+      `BEGIN SP_REGISTER_USER(:uname, :email, :phash, :urole, :licno, :ustatus, :new_id); END;`,
       {
-        usid: newId, uname: username, email,
+        uname: username, email,
         phash: password_hash, urole: userRole,
         licno: userRole === 'OWNER' ? license_number.trim() : null,
-        ustatus: userStatus
+        ustatus: userStatus,
+        new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
       },
       { autoCommit: true }
     );
+
+    const newId = result.outBinds.new_id;
 
     const message = userRole === 'OWNER'
       ? 'Owner account submitted for admin approval. You will be able to log in once approved.'
@@ -72,8 +70,10 @@ router.post('/login', async (req, res) => {
     conn = await getConnection();
     const { email, password_hash } = req.body;
 
+    // Authenticate using VW_USER_LOGIN view
     const result = await conn.execute(
-      `SELECT USER_ID, USERNAME, EMAIL, ROLE, STATUS FROM USERS
+      `SELECT USER_ID, USERNAME, EMAIL, ROLE, STATUS
+       FROM VW_USER_LOGIN
        WHERE EMAIL = :email AND PASSWORD_HASH = :phash`,
       { email, phash: password_hash },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -109,14 +109,10 @@ router.get('/:id/favorites', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT r.RESTAURANT_ID, r.NAME, r.ADDRESS, r.PRICE_RANGE,
-              ROUND(NVL(AVG(rv.RATING),0),1) AS AVG_RATING
-       FROM FAVORITES f
-       JOIN RESTAURANTS r ON f.RESTAURANT_ID = r.RESTAURANT_ID
-       LEFT JOIN REVIEWS rv ON r.RESTAURANT_ID = rv.RESTAURANT_ID AND rv.STATUS = 'APPROVED'
-       WHERE f.USER_ID = :usid
-       GROUP BY r.RESTAURANT_ID, r.NAME, r.ADDRESS, r.PRICE_RANGE, f.ADDED_AT
-       ORDER BY f.ADDED_AT DESC`,
+      `SELECT RESTAURANT_ID, NAME, ADDRESS, PRICE_RANGE, AVG_RATING
+       FROM VW_USER_FAVORITES
+       WHERE USER_ID = :usid
+       ORDER BY ADDED_AT DESC`,
       { usid: Number(req.params.id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -150,15 +146,14 @@ router.post('/:id/favorites', async (req, res) => {
 
     conn = await getConnection();
 
-    const seqRes = await conn.execute(
-      `SELECT SEQ_FAVORITE_ID.NEXTVAL AS NID FROM DUAL`,
-      [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const newId = seqRes.rows[0].NID;
-
+    // Add favorite using procedure
     await conn.execute(
-      `INSERT INTO FAVORITES (FAVORITE_ID, USER_ID, RESTAURANT_ID) VALUES (:fvid, :fvuid, :fvrid)`,
-      { fvid: newId, fvuid: Number(authUser.userId), fvrid: Number(restaurant_id) },
+      `BEGIN SP_ADD_FAVORITE(:usid, :rsid, :new_id); END;`,
+      {
+        usid: Number(authUser.userId),
+        rsid: Number(restaurant_id),
+        new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+      },
       { autoCommit: true }
     );
 
@@ -180,12 +175,10 @@ router.get('/me/invites', requireAuth, async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT ai.INVITE_ID, ai.STATUS, ai.CREATED_AT,
-              u.USERNAME AS INVITED_BY_NAME
-       FROM ADMIN_INVITES ai
-       JOIN USERS u ON ai.INVITED_BY = u.USER_ID
-       WHERE ai.INVITEE_ID = :usid AND ai.STATUS = 'PENDING'
-       ORDER BY ai.CREATED_AT DESC`,
+      `SELECT INVITE_ID, STATUS, CREATED_AT, INVITED_BY_NAME
+       FROM VW_USER_PENDING_INVITES
+       WHERE INVITEE_ID = :usid
+       ORDER BY CREATED_AT DESC`,
       { usid: Number(req.authUser.userId) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -206,35 +199,32 @@ router.put('/me/invites/:id/accept', requireAuth, async (req, res) => {
     const userId = req.authUser.userId;
     const inviteId = Number(req.params.id);
 
-    // Verify invite belongs to this user
-    const check = await conn.execute(
-      `SELECT INVITEE_ID FROM ADMIN_INVITES WHERE INVITE_ID = :invid AND STATUS = 'PENDING'`,
+    // Verify invite ownership using function
+    const inviteeResult = await conn.execute(
+      `SELECT FN_INVITE_OWNER(:invid) AS INVITEE_ID FROM DUAL`,
       { invid: inviteId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    if (check.rows.length === 0) {
+    const inviteeId = inviteeResult.rows[0].INVITEE_ID;
+
+    if (inviteeId === null) {
       return res.status(404).json({ success: false, message: 'Invite not found or already processed' });
     }
-    if (check.rows[0].INVITEE_ID !== userId) {
+    if (inviteeId !== userId) {
       return res.status(403).json({ success: false, message: 'This invite is not for you' });
     }
 
-    // Accept invite: update invite status + promote user to ADMIN
+    // Accept invite using procedure (multi-DML: update invite + promote user)
     await conn.execute(
-      `UPDATE ADMIN_INVITES SET STATUS = 'ACCEPTED' WHERE INVITE_ID = :invid`,
-      { invid: inviteId },
-      { autoCommit: false }
-    );
-    await conn.execute(
-      `UPDATE USERS SET ROLE = 'ADMIN' WHERE USER_ID = :usid`,
-      { usid: userId },
+      `BEGIN SP_ACCEPT_INVITE(:invid, :usid); END;`,
+      { invid: inviteId, usid: userId },
       { autoCommit: false }
     );
     await conn.commit();
 
-    // Return updated user data + new token with ADMIN role
+    // Return updated user data using VW_USER_PROFILE view + new token
     const userRes = await conn.execute(
-      `SELECT USER_ID, USERNAME, EMAIL, ROLE, STATUS FROM USERS WHERE USER_ID = :usid`,
+      `SELECT * FROM VW_USER_PROFILE WHERE USER_ID = :usid`,
       { usid: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -243,6 +233,7 @@ router.put('/me/invites/:id/accept', requireAuth, async (req, res) => {
 
     res.json({ success: true, message: 'You are now an admin!', data: user, token });
   } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch (_) {} }
     console.error('PUT /users/me/invites/:id/accept error:', err);
     res.status(500).json({ success: false, message: err.message || 'Database error' });
   } finally {
@@ -258,20 +249,24 @@ router.put('/me/invites/:id/decline', requireAuth, async (req, res) => {
     const userId = req.authUser.userId;
     const inviteId = Number(req.params.id);
 
-    const check = await conn.execute(
-      `SELECT INVITEE_ID FROM ADMIN_INVITES WHERE INVITE_ID = :invid AND STATUS = 'PENDING'`,
+    // Verify invite ownership using function
+    const inviteeResult = await conn.execute(
+      `SELECT FN_INVITE_OWNER(:invid) AS INVITEE_ID FROM DUAL`,
       { invid: inviteId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    if (check.rows.length === 0) {
+    const inviteeId = inviteeResult.rows[0].INVITEE_ID;
+
+    if (inviteeId === null) {
       return res.status(404).json({ success: false, message: 'Invite not found or already processed' });
     }
-    if (check.rows[0].INVITEE_ID !== userId) {
+    if (inviteeId !== userId) {
       return res.status(403).json({ success: false, message: 'This invite is not for you' });
     }
 
+    // Decline invite using procedure
     await conn.execute(
-      `UPDATE ADMIN_INVITES SET STATUS = 'DECLINED' WHERE INVITE_ID = :invid`,
+      `BEGIN SP_DECLINE_INVITE(:invid); END;`,
       { invid: inviteId },
       { autoCommit: true }
     );

@@ -10,18 +10,8 @@ router.get('/', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT
-         r.RESTAURANT_ID, r.NAME, r.LATITUDE, r.LONGITUDE,
-         r.ADDRESS, r.PRICE_RANGE, r.PHONE, r.WEBSITE,
-         ROUND(NVL(AVG(rv.RATING), 0), 1) AS AVG_RATING,
-         COUNT(rv.REVIEW_ID) AS REVIEW_COUNT
-       FROM RESTAURANTS r
-       LEFT JOIN REVIEWS rv ON r.RESTAURANT_ID = rv.RESTAURANT_ID AND rv.STATUS = 'APPROVED'
-       WHERE r.STATUS = 'APPROVED'
-       GROUP BY
-         r.RESTAURANT_ID, r.NAME, r.LATITUDE, r.LONGITUDE,
-         r.ADDRESS, r.PRICE_RANGE, r.PHONE, r.WEBSITE
-       ORDER BY AVG_RATING DESC, r.NAME ASC`,
+      `SELECT * FROM VW_RESTAURANTS_WITH_RATING
+       ORDER BY AVG_RATING DESC, NAME ASC`,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -35,10 +25,9 @@ router.get('/', async (req, res) => {
       ids.forEach((id, i) => { binds[`id${i}`] = id; });
 
       const cuisineResult = await conn.execute(
-        `SELECT rc.RESTAURANT_ID, c.NAME
-         FROM RESTAURANT_CUISINE rc
-         JOIN CUISINES c ON rc.CUISINE_ID = c.CUISINE_ID
-         WHERE rc.RESTAURANT_ID IN (${placeholders})`,
+        `SELECT RESTAURANT_ID, NAME
+         FROM VW_RESTAURANT_CUISINES
+         WHERE RESTAURANT_ID IN (${placeholders})`,
         binds,
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
@@ -66,17 +55,8 @@ router.get('/:id', async (req, res) => {
   try {
     conn = await getConnection();
     const result = await conn.execute(
-      `SELECT
-         r.RESTAURANT_ID, r.NAME, r.LATITUDE, r.LONGITUDE,
-         r.ADDRESS, r.PRICE_RANGE, r.PHONE, r.WEBSITE,
-         ROUND(NVL(AVG(rv.RATING), 0), 1) AS AVG_RATING,
-         COUNT(rv.REVIEW_ID) AS REVIEW_COUNT
-       FROM RESTAURANTS r
-       LEFT JOIN REVIEWS rv ON r.RESTAURANT_ID = rv.RESTAURANT_ID AND rv.STATUS = 'APPROVED'
-       WHERE r.RESTAURANT_ID = :rsid AND r.STATUS = 'APPROVED'
-       GROUP BY
-         r.RESTAURANT_ID, r.NAME, r.LATITUDE, r.LONGITUDE,
-         r.ADDRESS, r.PRICE_RANGE, r.PHONE, r.WEBSITE`,
+      `SELECT * FROM VW_RESTAURANTS_WITH_RATING
+       WHERE RESTAURANT_ID = :rsid`,
       { rsid: Number(req.params.id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -87,9 +67,8 @@ router.get('/:id', async (req, res) => {
 
     const restaurant = result.rows[0];
     const cuisineResult = await conn.execute(
-      `SELECT c.NAME FROM CUISINES c
-       JOIN RESTAURANT_CUISINE rc ON c.CUISINE_ID = rc.CUISINE_ID
-       WHERE rc.RESTAURANT_ID = :rsid`,
+      `SELECT NAME FROM VW_RESTAURANT_CUISINES
+       WHERE RESTAURANT_ID = :rsid`,
       { rsid: Number(req.params.id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -116,65 +95,25 @@ router.post('/', requireOwner, async (req, res) => {
       return res.status(400).json({ success: false, message: 'name, latitude, longitude, address are required' });
     }
 
-    // Sync sequence past current max to avoid ORA-00001 on PK after failed retries
-    const maxRes = await conn.execute(
-      `SELECT NVL(MAX(RESTAURANT_ID), 0) AS MAXID FROM RESTAURANTS`,
-      [],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const maxId = maxRes.rows[0].MAXID;
-
-    let newId;
-    // Keep pulling NEXTVAL until we're safely past the current max
-    do {
-      const seqRes = await conn.execute(
-        `SELECT SEQ_RESTAURANT_ID.NEXTVAL AS NID FROM DUAL`,
-        [],
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      newId = seqRes.rows[0].NID;
-    } while (newId <= maxId);
-
-    // CRITICAL: :uid, :rid, :name are Oracle reserved words.
-    // All bind names use prefix 'rs' (restaurant) to guarantee no conflicts.
-    await conn.execute(
-      `INSERT INTO RESTAURANTS
-         (RESTAURANT_ID, NAME, LATITUDE, LONGITUDE, ADDRESS, PRICE_RANGE, PHONE, WEBSITE, ADDED_BY, STATUS)
-       VALUES
-         (:rsid, :rsnm, :rslat, :rslng, :rsaddr, :rsprc, :rsph, :rsweb, :rsuid, 'PENDING')`,
+    // Use SP_ADD_RESTAURANT procedure (handles seq sync + cuisine linking)
+    const result = await conn.execute(
+      `BEGIN SP_ADD_RESTAURANT(:rsnm, :rslat, :rslng, :rsaddr, :rsprc, :rsph, :rsweb, :rsuid, :cuis, :new_id); END;`,
       {
-        rsid:  newId,
-        rsnm:  name,
+        rsnm: name,
         rslat: parseFloat(latitude),
         rslng: parseFloat(longitude),
         rsaddr: address,
         rsprc: price_range || '$$',
-        rsph:  phone || null,
+        rsph: phone || null,
         rsweb: website || null,
-        rsuid: Number(user_id)
+        rsuid: Number(user_id),
+        cuis: cuisines && cuisines.length > 0 ? cuisines.join(',') : null,
+        new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
       },
-      { autoCommit: false }
+      { autoCommit: true }
     );
+    const newId = result.outBinds.new_id;
 
-    // Link cuisines by name lookup
-    if (cuisines && cuisines.length > 0) {
-      for (const cuisineName of cuisines) {
-        const cRes = await conn.execute(
-          `SELECT CUISINE_ID FROM CUISINES WHERE UPPER(NAME) = UPPER(:csnm)`,
-          { csnm: cuisineName },
-          { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
-        if (cRes.rows.length > 0) {
-          await conn.execute(
-            `INSERT INTO RESTAURANT_CUISINE (RESTAURANT_ID, CUISINE_ID) VALUES (:rsid, :csid)`,
-            { rsid: newId, csid: cRes.rows[0].CUISINE_ID },
-            { autoCommit: false }
-          );
-        }
-      }
-    }
-
-    await conn.commit();
     res.status(201).json({ success: true, message: 'Restaurant submitted for admin approval', restaurant_id: newId });
   } catch (err) {
     if (conn) { try { await conn.rollback(); } catch (_) {} }
@@ -184,6 +123,7 @@ router.post('/', requireOwner, async (req, res) => {
     if (conn) await conn.close();
   }
 });
+
 // PUT /api/restaurants/:id — Owner submits update request (per-field)
 router.put('/:id', requireAuth, async (req, res) => {
   let conn;
@@ -197,10 +137,9 @@ router.put('/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Only owners can request updates' });
     }
 
-    // Verify ownership
+    // Verify ownership using VW_RESTAURANT_EDIT_INFO view
     const ownerCheck = await conn.execute(
-      `SELECT NAME, ADDRESS, PHONE, WEBSITE, PRICE_RANGE, ADDED_BY
-       FROM RESTAURANTS WHERE RESTAURANT_ID = :rsid AND STATUS = 'APPROVED'`,
+      `SELECT * FROM VW_RESTAURANT_EDIT_INFO WHERE RESTAURANT_ID = :rsid`,
       { rsid: restaurantId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -218,20 +157,16 @@ router.put('/:id', requireAuth, async (req, res) => {
     let requestCount = 0;
     for (const [field, newValue] of Object.entries(updatableFields)) {
       if (newValue !== undefined && newValue !== current[field]) {
-        const seqRes = await conn.execute(
-          `SELECT SEQ_REQUEST_ID.NEXTVAL AS NID FROM DUAL`,
-          [], { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
+        // Use SP_CREATE_UPDATE_REQUEST procedure
         await conn.execute(
-          `INSERT INTO UPDATE_REQUESTS (REQUEST_ID, RESTAURANT_ID, OWNER_ID, FIELD_NAME, OLD_VALUE, NEW_VALUE, STATUS)
-           VALUES (:reqid, :rsid, :owid, :fld, :oldv, :newv, 'PENDING')`,
+          `BEGIN SP_CREATE_UPDATE_REQUEST(:rsid, :owid, :fld, :oldv, :newv, :new_id); END;`,
           {
-            reqid: seqRes.rows[0].NID,
             rsid: restaurantId,
             owid: user_id,
             fld: field,
             oldv: current[field] || null,
-            newv: newValue || null
+            newv: newValue || null,
+            new_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
           },
           { autoCommit: false }
         );
