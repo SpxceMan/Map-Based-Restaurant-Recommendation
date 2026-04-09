@@ -641,6 +641,10 @@ END;
 
 -- ============ UTILITY ============
 
+-- =============================================================
+-- UTILITY (Continued from original code)
+-- =============================================================
+
 -- SP_SYNC_SEQUENCES: Advance all sequences past their current max ID
 CREATE OR REPLACE PROCEDURE SP_SYNC_SEQUENCES IS
   TYPE t_seq_pair IS RECORD (
@@ -675,5 +679,95 @@ BEGIN
       END LOOP;
     END IF;
   END LOOP;
+END;
+/
+
+-- =============================================================
+-- ADDITIONAL REQUESTED OBJECTS
+-- =============================================================
+
+-- Query 5: Admin Dashboard - Count Pending Submissions
+CREATE OR REPLACE VIEW VW_ADMIN_DASHBOARD_COUNTS AS
+SELECT 
+  (SELECT COUNT(*) FROM USERS WHERE ROLE = 'OWNER' AND STATUS = 'PENDING') AS PENDING_OWNERS,
+  (SELECT COUNT(*) FROM RESTAURANTS WHERE STATUS = 'PENDING') AS PENDING_RESTAURANTS,
+  (SELECT COUNT(*) FROM REVIEWS WHERE STATUS = 'PENDING') AS PENDING_REVIEWS,
+  (SELECT COUNT(*) FROM UPDATE_REQUESTS WHERE STATUS = 'PENDING') AS PENDING_UPDATES
+FROM DUAL;
+
+-- Function: GetAverageRating
+CREATE OR REPLACE FUNCTION GetAverageRating(
+  p_restaurant_id IN NUMBER
+) RETURN NUMBER IS
+  v_avg NUMBER;
+BEGIN
+  SELECT ROUND(NVL(AVG(RATING), 0), 1) INTO v_avg
+  FROM REVIEWS 
+  WHERE RESTAURANT_ID = p_restaurant_id AND STATUS = 'APPROVED';
+  RETURN v_avg;
+END;
+/
+
+-- Function: GetPriceLabel
+CREATE OR REPLACE FUNCTION GetPriceLabel(
+  p_price_range IN VARCHAR2
+) RETURN VARCHAR2 IS
+BEGIN
+  CASE p_price_range
+    WHEN '$' THEN RETURN 'Cheap Eats';
+    WHEN '$$' THEN RETURN 'Moderately Priced';
+    WHEN '$$$' THEN RETURN 'Expensive';
+    WHEN '$$$$' THEN RETURN 'Very Expensive';
+    ELSE RETURN 'Unknown';
+  END CASE;
+END;
+/
+
+-- Procedure: GetRestaurantStats
+CREATE OR REPLACE PROCEDURE GetRestaurantStats(
+  p_restaurant_id IN NUMBER,
+  p_avg OUT NUMBER,
+  p_count OUT NUMBER,
+  p_max OUT NUMBER,
+  p_min OUT NUMBER
+) IS
+BEGIN
+  SELECT 
+    ROUND(NVL(AVG(RATING), 0), 1),
+    COUNT(*),
+    NVL(MAX(RATING), 0),
+    NVL(MIN(RATING), 0)
+  INTO p_avg, p_count, p_max, p_min
+  FROM REVIEWS
+  WHERE RESTAURANT_ID = p_restaurant_id AND STATUS = 'APPROVED';
+END;
+/
+
+-- Trigger 1: trg_no_duplicate_review
+CREATE OR REPLACE TRIGGER trg_no_duplicate_review
+BEFORE INSERT ON REVIEWS
+FOR EACH ROW
+DECLARE
+  v_count NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO v_count 
+  FROM REVIEWS 
+  WHERE USER_ID = :NEW.USER_ID AND RESTAURANT_ID = :NEW.RESTAURANT_ID;
+  
+  IF v_count > 0 THEN
+    RAISE_APPLICATION_ERROR(-20005, 'User has already reviewed this restaurant');
+  END IF;
+END;
+/
+
+-- Trigger 2: trg_approval_timestamp (Update CREATED_AT to approval time when status changes to APPROVED)
+-- We use CREATED_AT here because the schema doesn't have an APPROVED_AT timestamp column.
+CREATE OR REPLACE TRIGGER trg_approval_timestamp
+BEFORE UPDATE OF STATUS ON RESTAURANTS
+FOR EACH ROW
+BEGIN
+  IF :NEW.STATUS = 'APPROVED' AND :OLD.STATUS = 'PENDING' THEN
+    :NEW.CREATED_AT := SYSTIMESTAMP;
+  END IF;
 END;
 /
